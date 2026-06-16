@@ -116,6 +116,8 @@ const ELLIPSE_A = 23.5;
 const ELLIPSE_B = 28.5;
 const ERROR_A   = 28.5;
 const ERROR_B   = 33.5;
+const EMPH_A    = 33.5;
+const EMPH_B    = 37.5;
 
 // Camera: identity → zoomed
 const CAM0 = {fx:0.500, fy:0.500, zoom:1.0, angle:0.00};
@@ -145,9 +147,10 @@ function draw(ts) {
   const annA       = fade(t, ANN_A, ANN_B);
   const glareScale = 0.50+0.50*fade(t, GLARE_A, GLARE_B);
   const zoomFade   = fade(t, ZOOM_A, ZOOM_B);
-  const hiliteA    = fade(t, HILITE_A, HILITE_B);
+  const hiliteA    = fade(t, HILITE_A, HILITE_B) * (1 - errEmph);
   const ellipseA   = fade(t, ELLIPSE_A, ELLIPSE_B);
   const errorA     = fade(t, ERROR_A, ERROR_B);
+  const errEmph    = fade(t, EMPH_A, EMPH_B);
 
   // Camera interpolation
   const camFX    = lerp(CAM0.fx, CAM1.fx, zoomFade)*W;
@@ -348,8 +351,10 @@ function draw(ts) {
     if (circ) {
       cx.save();
       cx.globalAlpha=errorA;
-      cx.strokeStyle='#FF3333';
-      cx.lineWidth=1.8*lw;
+      cx.strokeStyle='#FF2222';
+      cx.lineWidth=lerp(3.0, 5.5, errEmph)*lw;
+      cx.shadowColor='rgba(255,60,60,0.9)';
+      cx.shadowBlur=lerp(4, 22, errEmph)*lw;
       for (let i=0; i<19; i++) {
         if (HILITE_SET.has(i)) continue;
         const px=CERES[i].rx*W, py=CERES[i].ry*H;
