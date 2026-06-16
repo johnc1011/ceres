@@ -377,17 +377,26 @@ function draw(ts) {
     }
   }
 
-  // ── LSQ ellipse (better fit, sweeps in) ──────────────────────────────────
+  // ── LSQ ellipse (better fit, sweeps left → right) ────────────────────────
   if (lsqA>0) {
     const circ=getLSQOrbit();
     if (circ) {
-      const sa=Math.atan2(CERES[0].ry*H-circ.cy,CERES[0].rx*W-circ.cx);
+      // Find the leftmost and rightmost Ceres points by rx
+      const left  = CERES.reduce((a,b)=>a.rx<b.rx?a:b);
+      const right = CERES.reduce((a,b)=>a.rx>b.rx?a:b);
+      const angL  = Math.atan2(left.ry*H -circ.cy, left.rx*W -circ.cx);
+      let   angR  = Math.atan2(right.ry*H-circ.cy, right.rx*W-circ.cx);
+      // Ensure sweep goes clockwise (increasing angle) from left to right
+      if (angR<=angL) angR+=Math.PI*2;
+      const sweep = angR-angL;
       cx.save();
       cx.globalAlpha=Math.min(1,lsqA*1.4);
       cx.strokeStyle='rgba(120,255,180,0.85)';
       cx.lineWidth=2.5*lw;
       cx.shadowColor='rgba(80,230,140,0.6)'; cx.shadowBlur=10*lw;
-      cx.beginPath(); cx.arc(circ.cx,circ.cy,circ.r,sa,sa+Math.PI*2*lsqA,false); cx.stroke();
+      cx.beginPath();
+      cx.arc(circ.cx,circ.cy,circ.r, angL, angL+sweep*lsqA, false);
+      cx.stroke();
       cx.restore();
     }
   }
