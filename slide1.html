@@ -16,9 +16,14 @@ const cv = document.getElementById('c');
 const cx = cv.getContext('2d');
 let W, H;
 
-function resize() { W = cv.width = window.innerWidth; H = cv.height = window.innerHeight; }
+function resize() {
+  W = cv.width = window.innerWidth;
+  H = cv.height = window.innerHeight;
+  ORBIT_CIRC = null;
+  ORBIT_LSQ  = null;
+}
 resize();
-window.addEventListener('resize', () => { resize(); ORBIT_CIRC = null; });
+window.addEventListener('resize', resize);
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
@@ -42,72 +47,113 @@ const STARS = Array.from({length:600}, () => ({
   col: Math.random()<0.08 ? '#FFE8CC' : Math.random()<0.1 ? '#CCDEFF' : '#FFFFFF',
 }));
 
-// ── Taurus constellation ──────────────────────────────────────────────────────
+// ── Taurus ────────────────────────────────────────────────────────────────────
 const TAU_S = [
-  {rx:0.365, ry:0.455, r:4.8, c:'#FF9944'},
-  {rx:0.335, ry:0.435, r:1.7, c:'#FFEECC'},
-  {rx:0.350, ry:0.415, r:1.9, c:'#FFEECC'},
-  {rx:0.385, ry:0.405, r:1.6, c:'#FFEECC'},
-  {rx:0.415, ry:0.425, r:1.7, c:'#FFEECC'},
-  {rx:0.440, ry:0.360, r:1.9, c:'#CCDDFF'},
-  {rx:0.500, ry:0.270, r:2.9, c:'#AACCFF'},
-  {rx:0.225, ry:0.290, r:2.5, c:'#88AAFF'},
-  {rx:0.210, ry:0.315, r:1.3, c:'#88AAFF'},
-  {rx:0.240, ry:0.275, r:1.2, c:'#88AAFF'},
-  {rx:0.200, ry:0.285, r:1.1, c:'#88AAFF'},
-  {rx:0.250, ry:0.305, r:1.0, c:'#88AAFF'},
-  {rx:0.220, ry:0.255, r:1.0, c:'#88AAFF'},
-  {rx:0.235, ry:0.330, r:0.9, c:'#88AAFF'},
+  {rx:0.365,ry:0.455,r:4.8,c:'#FF9944'},
+  {rx:0.335,ry:0.435,r:1.7,c:'#FFEECC'},
+  {rx:0.350,ry:0.415,r:1.9,c:'#FFEECC'},
+  {rx:0.385,ry:0.405,r:1.6,c:'#FFEECC'},
+  {rx:0.415,ry:0.425,r:1.7,c:'#FFEECC'},
+  {rx:0.440,ry:0.360,r:1.9,c:'#CCDDFF'},
+  {rx:0.500,ry:0.270,r:2.9,c:'#AACCFF'},
+  {rx:0.225,ry:0.290,r:2.5,c:'#88AAFF'},
+  {rx:0.210,ry:0.315,r:1.3,c:'#88AAFF'},
+  {rx:0.240,ry:0.275,r:1.2,c:'#88AAFF'},
+  {rx:0.200,ry:0.285,r:1.1,c:'#88AAFF'},
+  {rx:0.250,ry:0.305,r:1.0,c:'#88AAFF'},
+  {rx:0.220,ry:0.255,r:1.0,c:'#88AAFF'},
+  {rx:0.235,ry:0.330,r:0.9,c:'#88AAFF'},
 ];
 const TAU_L = [[0,1],[1,2],[2,3],[3,0],[0,4],[4,3],[0,5],[5,6]];
 
-// ── Ceres: 19 positions with seeded observational scatter ────────────────────
+// ── Ceres: 19 positions with seeded scatter ───────────────────────────────────
 function qbez(t,x0,y0,x1,y1,x2,y2) {
   const m=1-t;
   return {rx:m*m*x0+2*m*t*x1+t*t*x2, ry:m*m*y0+2*m*t*y1+t*t*y2};
 }
 function xorshift(seed) {
-  let s = seed >>> 0;
-  return () => { s^=s<<13; s^=s>>17; s^=s<<5; return (s>>>0)/4294967296; };
+  let s=seed>>>0;
+  return ()=>{ s^=s<<13; s^=s>>17; s^=s<<5; return (s>>>0)/4294967296; };
 }
 const rng = xorshift(1801);
-const CP = {x0:0.405,y0:0.500, x1:0.560,y1:0.455, x2:0.725,y2:0.555};
-const CERES = Array.from({length:19}, (_,i) => {
+const CP = {x0:0.405,y0:0.500,x1:0.560,y1:0.455,x2:0.725,y2:0.555};
+const CERES = Array.from({length:19},(_,i)=>{
   const t=i/18;
   const pt=qbez(t,CP.x0,CP.y0,CP.x1,CP.y1,CP.x2,CP.y2);
-  return { rx: pt.rx+(rng()-0.5)*0.018, ry: pt.ry+(rng()-0.5)*0.014 };
+  return {rx:pt.rx+(rng()-0.5)*0.018, ry:pt.ry+(rng()-0.5)*0.014};
 });
 
-const SUN = {rx:0.825, ry:0.690};
+const SUN = {rx:0.825,ry:0.690};
 
-// ── Orbit: circumscribed circle through 3 highlighted points ─────────────────
-const HILITE     = [0, 9, 18];
+// ── Orbit fits ────────────────────────────────────────────────────────────────
+const HILITE     = [0,9,18];
 const HILITE_SET = new Set(HILITE);
-let   ORBIT_CIRC = null;
+let   ORBIT_CIRC = null;  // circumscribed circle through 3 highlighted points
+let   ORBIT_LSQ  = null;  // least-squares circle through all 19
 
 function circumscribedCircle(x1,y1,x2,y2,x3,y3) {
-  const D = 2*(x1*(y2-y3)+x2*(y3-y1)+x3*(y1-y2));
-  if (Math.abs(D) < 1e-6) return null;
+  const D=2*(x1*(y2-y3)+x2*(y3-y1)+x3*(y1-y2));
+  if (Math.abs(D)<1e-6) return null;
   const s1=x1*x1+y1*y1, s2=x2*x2+y2*y2, s3=x3*x3+y3*y3;
   const ux=(s1*(y2-y3)+s2*(y3-y1)+s3*(y1-y2))/D;
   const uy=(s1*(x3-x2)+s2*(x1-x3)+s3*(x2-x1))/D;
-  return { cx:ux, cy:uy, r:Math.sqrt((x1-ux)**2+(y1-uy)**2) };
-}
-function getOrbit() {
-  if (ORBIT_CIRC) return ORBIT_CIRC;
-  const pts = HILITE.map(i=>({x:CERES[i].rx*W, y:CERES[i].ry*H}));
-  ORBIT_CIRC = circumscribedCircle(pts[0].x,pts[0].y,pts[1].x,pts[1].y,pts[2].x,pts[2].y);
-  return ORBIT_CIRC;
+  return {cx:ux, cy:uy, r:Math.sqrt((x1-ux)**2+(y1-uy)**2)};
 }
 
-// ── Timing (seconds) ──────────────────────────────────────────────────────────
+function solve3x3(A,b) {
+  const M=A.map((row,i)=>[...row,b[i]]);
+  for (let c=0;c<3;c++) {
+    let mx=c;
+    for (let r=c+1;r<3;r++) if(Math.abs(M[r][c])>Math.abs(M[mx][c])) mx=r;
+    [M[c],M[mx]]=[M[mx],M[c]];
+    for (let r=c+1;r<3;r++) {
+      const f=M[r][c]/M[c][c];
+      for (let j=c;j<=3;j++) M[r][j]-=f*M[c][j];
+    }
+  }
+  const x=[0,0,0];
+  for (let i=2;i>=0;i--) {
+    x[i]=M[i][3];
+    for (let j=i+1;j<3;j++) x[i]-=M[i][j]*x[j];
+    x[i]/=M[i][i];
+  }
+  return x;
+}
+
+function fitCircleLSQ(pts) {
+  // Minimise algebraic distance: x*u + y*v + w = x²+y², centre=(u/2,v/2)
+  let Sx=0,Sy=0,Sxx=0,Sxy=0,Syy=0,Szx=0,Szy=0,Sz=0;
+  for (const {x,y} of pts) {
+    const z=x*x+y*y;
+    Sx+=x; Sy+=y; Sxx+=x*x; Sxy+=x*y; Syy+=y*y;
+    Szx+=z*x; Szy+=z*y; Sz+=z;
+  }
+  const N=pts.length;
+  const [u,v,w]=solve3x3([[Sxx,Sxy,Sx],[Sxy,Syy,Sy],[Sx,Sy,N]],[Szx,Szy,Sz]);
+  const ccx=u/2, ccy=v/2;
+  return {cx:ccx, cy:ccy, r:Math.sqrt(w+ccx*ccx+ccy*ccy)};
+}
+
+function getOrbit() {
+  if (ORBIT_CIRC) return ORBIT_CIRC;
+  const p=HILITE.map(i=>({x:CERES[i].rx*W,y:CERES[i].ry*H}));
+  ORBIT_CIRC=circumscribedCircle(p[0].x,p[0].y,p[1].x,p[1].y,p[2].x,p[2].y);
+  return ORBIT_CIRC;
+}
+function getLSQOrbit() {
+  if (ORBIT_LSQ) return ORBIT_LSQ;
+  ORBIT_LSQ=fitCircleLSQ(CERES.map(p=>({x:p.rx*W,y:p.ry*H})));
+  return ORBIT_LSQ;
+}
+
+// ── Timing (t-units; divide by 500ms so 2× real speed) ───────────────────────
 const CER0      = 3.0;
 const CERDT     = 0.32;
-const CER_END   = CER0 + 19*CERDT;   // ~9.1s
+const CER_END   = CER0+19*CERDT;
 const ANN_A     = CER_END;
-const ANN_B     = CER_END + 2.0;
-const GLARE_A   = CER_END + 1.2;
-const GLARE_B   = CER_END + 5.5;
+const ANN_B     = CER_END+2.0;
+const GLARE_A   = CER_END+1.2;
+const GLARE_B   = CER_END+5.5;
 const ZOOM_A    = 16.5;
 const ZOOM_B    = 21.0;
 const HILITE_A  = 21.0;
@@ -118,70 +164,72 @@ const ERROR_A   = 28.5;
 const ERROR_B   = 33.5;
 const EMPH_A    = 33.5;
 const EMPH_B    = 37.5;
+// Phase 2: redraw with LSQ fit
+const REDRAW_A  = 37.5;   // old ellipse + errors start fading
+const REDRAW_B  = 40.5;   // old stuff fully gone
+const LSQ_IN_A  = 38.5;   // new ellipse starts sweeping in
+const LSQ_IN_B  = 44.5;   // new ellipse fully drawn
+const NEWERR_A  = 44.5;   // new error bars (all 19) fade in
+const NEWERR_B  = 48.5;
 
-// Camera: identity → zoomed
-const CAM0 = {fx:0.500, fy:0.500, zoom:1.0, angle:0.00};
-const CAM1 = {fx:0.575, fy:0.515, zoom:2.20, angle:-0.10};
+// Camera
+const CAM0={fx:0.500,fy:0.500,zoom:1.0,angle:0.00};
+const CAM1={fx:0.575,fy:0.515,zoom:2.20,angle:-0.10};
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
-let t0 = null;
+let t0=null;
 
 function draw(ts) {
-  if (!t0) t0 = ts;
-  const t = (ts-t0)/500; // 2× speed
+  if (!t0) t0=ts;
+  const t=(ts-t0)/500;
 
   cx.clearRect(0,0,W,H);
 
-  // Sky background (screen-space, no camera)
-  const skyG = cx.createLinearGradient(0,0,0,H);
-  skyG.addColorStop(0,    '#07091c');
-  skyG.addColorStop(0.55, '#040813');
-  skyG.addColorStop(1,    '#020309');
-  cx.fillStyle = skyG;
-  cx.fillRect(0,0,W,H);
+  // Sky
+  const skyG=cx.createLinearGradient(0,0,0,H);
+  skyG.addColorStop(0,'#07091c'); skyG.addColorStop(0.55,'#040813'); skyG.addColorStop(1,'#020309');
+  cx.fillStyle=skyG; cx.fillRect(0,0,W,H);
 
-  // ── Derived animation values ─────────────────────────────────────────────
-  const skyA       = fade(t, 0, 2.0);
-  const conA       = fade(t, 1.5, 3.5);
-  const ceresN     = Math.floor(fade(t, CER0, CER_END)*19);
-  const annA       = fade(t, ANN_A, ANN_B);
-  const glareScale = 0.50+0.50*fade(t, GLARE_A, GLARE_B);
-  const zoomFade   = fade(t, ZOOM_A, ZOOM_B);
-  const errEmph    = fade(t, EMPH_A, EMPH_B);
-  const hiliteA    = fade(t, HILITE_A, HILITE_B) * (1 - errEmph);
-  const ellipseA   = fade(t, ELLIPSE_A, ELLIPSE_B);
-  const errorA     = fade(t, ERROR_A, ERROR_B);
+  // ── Derived values ───────────────────────────────────────────────────────
+  const skyA       = fade(t,0,2.0);
+  const conA       = fade(t,1.5,3.5);
+  const ceresN     = Math.floor(fade(t,CER0,CER_END)*19);
+  const annA       = fade(t,ANN_A,ANN_B);
+  const glareScale = 0.50+0.50*fade(t,GLARE_A,GLARE_B);
+  const zoomFade   = fade(t,ZOOM_A,ZOOM_B);
+  const errEmph    = fade(t,EMPH_A,EMPH_B);
+  const oldOut     = 1-fade(t,REDRAW_A,REDRAW_B);  // old ellipse/errors fade out
+  const hiliteA    = fade(t,HILITE_A,HILITE_B)*(1-errEmph)*oldOut;
+  const ellipseA   = fade(t,ELLIPSE_A,ELLIPSE_B)*oldOut;
+  const errorA     = fade(t,ERROR_A,ERROR_B)*oldOut;
+  const lsqA       = fade(t,LSQ_IN_A,LSQ_IN_B);
+  const newErrA    = fade(t,NEWERR_A,NEWERR_B);
 
-  // Camera interpolation
-  const camFX    = lerp(CAM0.fx, CAM1.fx, zoomFade)*W;
-  const camFY    = lerp(CAM0.fy, CAM1.fy, zoomFade)*H;
-  const camZoom  = lerp(CAM0.zoom, CAM1.zoom, zoomFade);
-  const camAngle = lerp(CAM0.angle, CAM1.angle, zoomFade);
-  const lw       = 1/camZoom; // line-width scale to keep visual thickness constant
+  const camFX   =lerp(CAM0.fx,CAM1.fx,zoomFade)*W;
+  const camFY   =lerp(CAM0.fy,CAM1.fy,zoomFade)*H;
+  const camZoom =lerp(CAM0.zoom,CAM1.zoom,zoomFade);
+  const camAngle=lerp(CAM0.angle,CAM1.angle,zoomFade);
+  const lw      =1/camZoom;
 
-  // Sun world-space coords
-  const sx = SUN.rx*W, sy = SUN.ry*H;
-  const sunR   = Math.min(W,H)*0.050;
-  const glareR = Math.min(W,H)*0.46*glareScale;
+  const sx=SUN.rx*W, sy=SUN.ry*H;
+  const sunR  =Math.min(W,H)*0.050;
+  const glareR=Math.min(W,H)*0.46*glareScale;
 
-  // ── Apply camera transform ───────────────────────────────────────────────
+  // ── Camera transform ─────────────────────────────────────────────────────
   cx.save();
-  cx.translate(W/2, H/2);
+  cx.translate(W/2,H/2);
   cx.rotate(camAngle);
-  cx.scale(camZoom, camZoom);
-  cx.translate(-camFX, -camFY);
+  cx.scale(camZoom,camZoom);
+  cx.translate(-camFX,-camFY);
 
-  // Milky Way (in camera space, fades at zoom)
+  // Milky Way
   cx.save();
-  cx.globalAlpha = 1-zoomFade*0.6;
-  const mw = cx.createLinearGradient(W*0.1,H*0.05,W*0.65,H*0.85);
-  mw.addColorStop(0,    'rgba(70,85,135,0)');
-  mw.addColorStop(0.35, 'rgba(70,85,135,0.055)');
-  mw.addColorStop(0.5,  'rgba(70,85,135,0.08)');
-  mw.addColorStop(0.65, 'rgba(70,85,135,0.055)');
-  mw.addColorStop(1,    'rgba(70,85,135,0)');
-  cx.fillStyle = mw;
-  cx.fillRect(0,0,W,H);
+  cx.globalAlpha=1-zoomFade*0.6;
+  const mw=cx.createLinearGradient(W*0.1,H*0.05,W*0.65,H*0.85);
+  mw.addColorStop(0,'rgba(70,85,135,0)'); mw.addColorStop(0.35,'rgba(70,85,135,0.055)');
+  mw.addColorStop(0.5,'rgba(70,85,135,0.08)'); mw.addColorStop(0.65,'rgba(70,85,135,0.055)');
+  mw.addColorStop(1,'rgba(70,85,135,0)');
+  cx.fillStyle=mw; cx.fillRect(0,0,W,H);
   cx.restore();
 
   // ── Stars ────────────────────────────────────────────────────────────────
@@ -189,82 +237,58 @@ function draw(ts) {
     const dx=s.rx-SUN.rx, dy=s.ry-SUN.ry;
     const dist=Math.sqrt(dx*dx+dy*dy);
     const inner=0.20*glareScale, outer=0.40*glareScale;
-    if (dist < inner) continue;
-    let sa = s.a*skyA*(0.78+0.22*Math.sin(t*s.sp+s.ph));
-    if (dist < outer) sa *= (dist-inner)/(outer-inner);
+    if (dist<inner) continue;
+    let sa=s.a*skyA*(0.78+0.22*Math.sin(t*s.sp+s.ph));
+    if (dist<outer) sa*=(dist-inner)/(outer-inner);
     const [r,g,b]=hex2rgb(s.col);
-    cx.beginPath();
-    // Divide by camZoom so visual star size stays constant
-    cx.arc(s.rx*W, s.ry*H, s.r*lw, 0, Math.PI*2);
-    cx.fillStyle = `rgba(${r},${g},${b},${sa})`;
-    cx.fill();
+    cx.beginPath(); cx.arc(s.rx*W,s.ry*H,s.r*lw,0,Math.PI*2);
+    cx.fillStyle=`rgba(${r},${g},${b},${sa})`; cx.fill();
   }
 
-  // ── Sun glare ────────────────────────────────────────────────────────────
-  {
-    const g=cx.createRadialGradient(sx,sy,sunR,sx,sy,glareR);
-    g.addColorStop(0,    `rgba(255,215,90,${0.22*glareScale})`);
-    g.addColorStop(0.18, `rgba(255,175,45,${0.14*glareScale})`);
-    g.addColorStop(0.45, `rgba(255,130,20,${0.07*glareScale})`);
-    g.addColorStop(0.72, `rgba(255,85,10,${0.03*glareScale})`);
-    g.addColorStop(1,    'rgba(255,50,0,0)');
-    cx.fillStyle=g;
-    cx.beginPath(); cx.arc(sx,sy,glareR,0,Math.PI*2); cx.fill();
-  }
-  {
-    const g=cx.createRadialGradient(sx,sy,0,sx,sy,sunR*5);
-    g.addColorStop(0,   'rgba(255,250,210,0.85)');
-    g.addColorStop(0.35,'rgba(255,230,130,0.40)');
-    g.addColorStop(0.65,'rgba(255,200,70,0.15)');
-    g.addColorStop(1,   'rgba(255,150,30,0)');
-    cx.fillStyle=g;
-    cx.beginPath(); cx.arc(sx,sy,sunR*5,0,Math.PI*2); cx.fill();
-  }
-  {
-    const g=cx.createRadialGradient(sx-sunR*0.25,sy-sunR*0.2,0,sx,sy,sunR);
-    g.addColorStop(0,   '#FFFFFF');
-    g.addColorStop(0.25,'#FFFBE0');
-    g.addColorStop(0.7, '#FFDF60');
-    g.addColorStop(1,   '#FFA820');
-    cx.fillStyle=g;
-    cx.beginPath(); cx.arc(sx,sy,sunR,0,Math.PI*2); cx.fill();
-  }
-  cx.save();
-  cx.translate(sx,sy);
-  for (let i=0; i<16; i++) {
+  // ── Sun ──────────────────────────────────────────────────────────────────
+  {const g=cx.createRadialGradient(sx,sy,sunR,sx,sy,glareR);
+  g.addColorStop(0,`rgba(255,215,90,${0.22*glareScale})`);
+  g.addColorStop(0.18,`rgba(255,175,45,${0.14*glareScale})`);
+  g.addColorStop(0.45,`rgba(255,130,20,${0.07*glareScale})`);
+  g.addColorStop(0.72,`rgba(255,85,10,${0.03*glareScale})`);
+  g.addColorStop(1,'rgba(255,50,0,0)');
+  cx.fillStyle=g; cx.beginPath(); cx.arc(sx,sy,glareR,0,Math.PI*2); cx.fill();}
+  {const g=cx.createRadialGradient(sx,sy,0,sx,sy,sunR*5);
+  g.addColorStop(0,'rgba(255,250,210,0.85)'); g.addColorStop(0.35,'rgba(255,230,130,0.40)');
+  g.addColorStop(0.65,'rgba(255,200,70,0.15)'); g.addColorStop(1,'rgba(255,150,30,0)');
+  cx.fillStyle=g; cx.beginPath(); cx.arc(sx,sy,sunR*5,0,Math.PI*2); cx.fill();}
+  {const g=cx.createRadialGradient(sx-sunR*0.25,sy-sunR*0.2,0,sx,sy,sunR);
+  g.addColorStop(0,'#FFFFFF'); g.addColorStop(0.25,'#FFFBE0');
+  g.addColorStop(0.7,'#FFDF60'); g.addColorStop(1,'#FFA820');
+  cx.fillStyle=g; cx.beginPath(); cx.arc(sx,sy,sunR,0,Math.PI*2); cx.fill();}
+  cx.save(); cx.translate(sx,sy);
+  for (let i=0;i<16;i++) {
     const a=(i/16)*Math.PI*2+t*0.04;
     const len=sunR*(0.8+0.25*Math.sin(t*1.1+i*0.7));
     cx.beginPath();
-    cx.moveTo(Math.cos(a)*sunR*0.92, Math.sin(a)*sunR*0.92);
-    cx.lineTo(Math.cos(a)*(sunR+len), Math.sin(a)*(sunR+len));
+    cx.moveTo(Math.cos(a)*sunR*0.92,Math.sin(a)*sunR*0.92);
+    cx.lineTo(Math.cos(a)*(sunR+len),Math.sin(a)*(sunR+len));
     cx.strokeStyle=`rgba(255,225,100,${0.35+0.1*Math.sin(t*0.9+i)})`;
-    cx.lineWidth=1.2*lw;
-    cx.stroke();
+    cx.lineWidth=1.2*lw; cx.stroke();
   }
   cx.restore();
 
   // ── Taurus ───────────────────────────────────────────────────────────────
-  if (conA > 0) {
-    cx.save();
-    cx.globalAlpha=conA*0.38;
-    cx.strokeStyle='#3355AA';
-    cx.lineWidth=0.9*lw;
+  if (conA>0) {
+    cx.save(); cx.globalAlpha=conA*0.38; cx.strokeStyle='#3355AA'; cx.lineWidth=0.9*lw;
     for (const [a,b] of TAU_L) {
-      cx.beginPath();
-      cx.moveTo(TAU_S[a].rx*W, TAU_S[a].ry*H);
-      cx.lineTo(TAU_S[b].rx*W, TAU_S[b].ry*H);
-      cx.stroke();
+      cx.beginPath(); cx.moveTo(TAU_S[a].rx*W,TAU_S[a].ry*H);
+      cx.lineTo(TAU_S[b].rx*W,TAU_S[b].ry*H); cx.stroke();
     }
     cx.restore();
-    cx.save();
-    cx.globalAlpha=conA;
+    cx.save(); cx.globalAlpha=conA;
     for (const s of TAU_S) {
-      const x=s.rx*W, y=s.ry*H;
+      const x=s.rx*W,y=s.ry*H;
       const [r,g,b]=hex2rgb(s.c);
       const gl=cx.createRadialGradient(x,y,0,x,y,s.r*5.5);
-      gl.addColorStop(0,    `rgba(${r},${g},${b},0.65)`);
-      gl.addColorStop(0.35, `rgba(${r},${g},${b},0.2)`);
-      gl.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+      gl.addColorStop(0,`rgba(${r},${g},${b},0.65)`);
+      gl.addColorStop(0.35,`rgba(${r},${g},${b},0.2)`);
+      gl.addColorStop(1,`rgba(${r},${g},${b},0)`);
       cx.fillStyle=gl; cx.beginPath(); cx.arc(x,y,s.r*5.5,0,Math.PI*2); cx.fill();
       cx.fillStyle=s.c; cx.beginPath(); cx.arc(x,y,s.r*lw,0,Math.PI*2); cx.fill();
     }
@@ -272,119 +296,137 @@ function draw(ts) {
   }
 
   // ── Ceres trail ──────────────────────────────────────────────────────────
-  if (ceresN > 1) {
-    cx.save();
-    cx.globalAlpha=0.40;
-    cx.strokeStyle='#FFCC44';
-    cx.lineWidth=1.6*lw;
-    cx.setLineDash([4*lw,4*lw]);
-    cx.beginPath();
-    cx.moveTo(CERES[0].rx*W, CERES[0].ry*H);
-    for (let i=1; i<ceresN; i++) cx.lineTo(CERES[i].rx*W, CERES[i].ry*H);
-    cx.stroke();
-    cx.setLineDash([]);
-    cx.restore();
+  if (ceresN>1) {
+    cx.save(); cx.globalAlpha=0.40; cx.strokeStyle='#FFCC44';
+    cx.lineWidth=1.6*lw; cx.setLineDash([4*lw,4*lw]);
+    cx.beginPath(); cx.moveTo(CERES[0].rx*W,CERES[0].ry*H);
+    for (let i=1;i<ceresN;i++) cx.lineTo(CERES[i].rx*W,CERES[i].ry*H);
+    cx.stroke(); cx.setLineDash([]); cx.restore();
   }
 
   // ── Future path arrow ────────────────────────────────────────────────────
-  if (annA > 0 && ceresN >= 19) {
+  if (annA>0 && ceresN>=19) {
     const last=CERES[18];
-    const lx=last.rx*W, ly=last.ry*H;
-    const ang=Math.atan2(sy-ly, sx-lx);
+    const lx=last.rx*W,ly=last.ry*H;
+    const ang=Math.atan2(sy-ly,sx-lx);
     const ex=sx-Math.cos(ang)*sunR*1.15, ey=sy-Math.sin(ang)*sunR*1.15;
     const ahL=15*lw;
-    cx.save();
-    cx.globalAlpha=0.75*annA;
+    cx.save(); cx.globalAlpha=0.75*annA;
     cx.strokeStyle='#FF8844'; cx.lineWidth=2*lw;
     cx.setLineDash([7*lw,5*lw]);
     cx.beginPath(); cx.moveTo(lx,ly); cx.lineTo(ex,ey); cx.stroke();
     cx.setLineDash([]);
     cx.fillStyle='#FF8844';
-    cx.beginPath();
-    cx.moveTo(ex,ey);
-    cx.lineTo(ex-ahL*Math.cos(ang-0.38), ey-ahL*Math.sin(ang-0.38));
-    cx.lineTo(ex-ahL*Math.cos(ang+0.38), ey-ahL*Math.sin(ang+0.38));
-    cx.closePath(); cx.fill();
-    cx.restore();
+    cx.beginPath(); cx.moveTo(ex,ey);
+    cx.lineTo(ex-ahL*Math.cos(ang-0.38),ey-ahL*Math.sin(ang-0.38));
+    cx.lineTo(ex-ahL*Math.cos(ang+0.38),ey-ahL*Math.sin(ang+0.38));
+    cx.closePath(); cx.fill(); cx.restore();
   }
 
   // ── Ceres dots ───────────────────────────────────────────────────────────
-  const dimF = 1-0.5*hiliteA;
-  for (let i=0; i<ceresN; i++) {
-    if (HILITE_SET.has(i)) continue; // drawn separately below
+  const dimF=1-0.5*hiliteA;
+  for (let i=0;i<ceresN;i++) {
+    if (HILITE_SET.has(i)) continue;
     const pt=CERES[i];
-    const px=pt.rx*W, py=pt.ry*H;
+    const px=pt.rx*W,py=pt.ry*H;
     const dotR=(i===18?6.5:4)*lw;
     const dotCol=i===18?'#FF6644':'#FFD060';
     const [r,g,b]=hex2rgb(dotCol);
     const gl=cx.createRadialGradient(px,py,0,px,py,dotR*5.5);
-    gl.addColorStop(0,   `rgba(${r},${g},${b},${0.70*dimF})`);
-    gl.addColorStop(0.4, `rgba(${r},${g},${b},${0.22*dimF})`);
-    gl.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+    gl.addColorStop(0,`rgba(${r},${g},${b},${0.70*dimF})`);
+    gl.addColorStop(0.4,`rgba(${r},${g},${b},${0.22*dimF})`);
+    gl.addColorStop(1,`rgba(${r},${g},${b},0)`);
     cx.fillStyle=gl; cx.beginPath(); cx.arc(px,py,dotR*5.5,0,Math.PI*2); cx.fill();
     cx.beginPath(); cx.arc(px,py,dotR,0,Math.PI*2);
     cx.fillStyle=dotCol; cx.fill();
     cx.strokeStyle='rgba(255,255,255,0.55)'; cx.lineWidth=0.8*lw; cx.stroke();
   }
 
-  // ── Orbit ellipse (before highlights so highlights sit on top) ────────────
-  if (ellipseA > 0) {
+  // ── First ellipse (3-point circumscribed, fades out) ─────────────────────
+  if (ellipseA>0) {
     const circ=getOrbit();
     if (circ) {
-      const startAng=Math.atan2(CERES[HILITE[0]].ry*H-circ.cy, CERES[HILITE[0]].rx*W-circ.cx);
+      const sa=Math.atan2(CERES[HILITE[0]].ry*H-circ.cy,CERES[HILITE[0]].rx*W-circ.cx);
       cx.save();
-      cx.globalAlpha=Math.min(1, ellipseA*1.4);
+      cx.globalAlpha=Math.min(1,ellipseA*1.4);
       cx.strokeStyle='rgba(80,210,255,0.80)';
       cx.lineWidth=2.5*lw;
-      cx.shadowColor='rgba(60,180,255,0.6)';
-      cx.shadowBlur=10*lw;
-      cx.beginPath();
-      cx.arc(circ.cx, circ.cy, circ.r, startAng, startAng+Math.PI*2*ellipseA, false);
-      cx.stroke();
+      cx.shadowColor='rgba(60,180,255,0.6)'; cx.shadowBlur=10*lw;
+      cx.beginPath(); cx.arc(circ.cx,circ.cy,circ.r,sa,sa+Math.PI*2,false); cx.stroke();
       cx.restore();
     }
   }
 
-  // ── Error lines: 16 non-highlighted points → nearest point on orbit ─────
-  if (errorA > 0) {
+  // ── Error lines — 16 points, first fit (fades out) ───────────────────────
+  if (errorA>0) {
     const circ=getOrbit();
     if (circ) {
+      const effEmph=errEmph*oldOut;
       cx.save();
       cx.globalAlpha=errorA;
       cx.strokeStyle='#FF2222';
-      cx.lineWidth=lerp(3.0, 5.5, errEmph)*lw;
+      cx.lineWidth=lerp(3.0,5.5,effEmph)*lw;
       cx.shadowColor='rgba(255,60,60,0.9)';
-      cx.shadowBlur=lerp(4, 22, errEmph)*lw;
-      for (let i=0; i<19; i++) {
+      cx.shadowBlur=lerp(4,22,effEmph)*lw;
+      for (let i=0;i<19;i++) {
         if (HILITE_SET.has(i)) continue;
-        const px=CERES[i].rx*W, py=CERES[i].ry*H;
-        const dx=px-circ.cx, dy=py-circ.cy;
-        const d=Math.sqrt(dx*dx+dy*dy);
-        const nx=circ.cx+dx/d*circ.r, ny=circ.cy+dy/d*circ.r;
+        const px=CERES[i].rx*W,py=CERES[i].ry*H;
+        const dx=px-circ.cx,dy=py-circ.cy,d=Math.sqrt(dx*dx+dy*dy);
+        const nx=circ.cx+dx/d*circ.r,ny=circ.cy+dy/d*circ.r;
         cx.beginPath(); cx.moveTo(px,py); cx.lineTo(nx,ny); cx.stroke();
       }
       cx.restore();
     }
   }
 
-  // ── Highlighted points ────────────────────────────────────────────────────
-  if (hiliteA > 0) {
+  // ── LSQ ellipse (better fit, sweeps in) ──────────────────────────────────
+  if (lsqA>0) {
+    const circ=getLSQOrbit();
+    if (circ) {
+      const sa=Math.atan2(CERES[0].ry*H-circ.cy,CERES[0].rx*W-circ.cx);
+      cx.save();
+      cx.globalAlpha=Math.min(1,lsqA*1.4);
+      cx.strokeStyle='rgba(120,255,180,0.85)';
+      cx.lineWidth=2.5*lw;
+      cx.shadowColor='rgba(80,230,140,0.6)'; cx.shadowBlur=10*lw;
+      cx.beginPath(); cx.arc(circ.cx,circ.cy,circ.r,sa,sa+Math.PI*2*lsqA,false); cx.stroke();
+      cx.restore();
+    }
+  }
+
+  // ── New error lines — all 19 points, LSQ fit ─────────────────────────────
+  if (newErrA>0) {
+    const circ=getLSQOrbit();
+    if (circ) {
+      cx.save();
+      cx.globalAlpha=newErrA;
+      cx.strokeStyle='#FF2222';
+      cx.lineWidth=3.5*lw;
+      cx.shadowColor='rgba(255,60,60,0.9)'; cx.shadowBlur=14*lw;
+      for (let i=0;i<19;i++) {
+        const px=CERES[i].rx*W,py=CERES[i].ry*H;
+        const dx=px-circ.cx,dy=py-circ.cy,d=Math.sqrt(dx*dx+dy*dy);
+        const nx=circ.cx+dx/d*circ.r,ny=circ.cy+dy/d*circ.r;
+        cx.beginPath(); cx.moveTo(px,py); cx.lineTo(nx,ny); cx.stroke();
+      }
+      cx.restore();
+    }
+  }
+
+  // ── Highlighted points (3 anchors, fade with errEmph×oldOut) ─────────────
+  if (hiliteA>0) {
     for (const i of HILITE) {
-      if (i >= ceresN) continue;
+      if (i>=ceresN) continue;
       const pt=CERES[i];
-      const px=pt.rx*W, py=pt.ry*H;
+      const px=pt.rx*W,py=pt.ry*H;
       const pulse=1+0.18*Math.sin(t*4+i*1.4);
       const dotR=(i===18?7:5.5)*lw*pulse;
-
-      cx.save();
-      cx.globalAlpha=hiliteA;
-      // Outer glow
+      cx.save(); cx.globalAlpha=hiliteA;
       const gl=cx.createRadialGradient(px,py,0,px,py,dotR*8);
-      gl.addColorStop(0,    'rgba(100,240,255,0.85)');
-      gl.addColorStop(0.30, 'rgba(60,190,230,0.30)');
-      gl.addColorStop(1,    'rgba(20,120,180,0)');
+      gl.addColorStop(0,'rgba(100,240,255,0.85)');
+      gl.addColorStop(0.30,'rgba(60,190,230,0.30)');
+      gl.addColorStop(1,'rgba(20,120,180,0)');
       cx.fillStyle=gl; cx.beginPath(); cx.arc(px,py,dotR*8,0,Math.PI*2); cx.fill();
-      // Core
       cx.fillStyle='#CCFFFF';
       cx.beginPath(); cx.arc(px,py,dotR,0,Math.PI*2); cx.fill();
       cx.strokeStyle='#FFFFFF'; cx.lineWidth=1.5*lw; cx.stroke();
@@ -392,37 +434,26 @@ function draw(ts) {
     }
   }
 
-  // ── Restore camera ────────────────────────────────────────────────────────
-  cx.restore();
+  cx.restore(); // end camera
 
-  // ── Observatory silhouette (screen-space, fades out during zoom) ──────────
+  // ── Horizon silhouette (fades out during zoom) ────────────────────────────
   const horizA=skyA*(1-zoomFade);
-  if (horizA > 0.01) {
-    cx.save();
-    cx.globalAlpha=horizA;
+  if (horizA>0.01) {
+    cx.save(); cx.globalAlpha=horizA;
     const gg=cx.createLinearGradient(0,H*0.875,0,H);
-    gg.addColorStop(0,    'rgba(2,3,9,0)');
-    gg.addColorStop(0.35, 'rgba(2,3,9,0.88)');
-    gg.addColorStop(1,    '#010207');
+    gg.addColorStop(0,'rgba(2,3,9,0)'); gg.addColorStop(0.35,'rgba(2,3,9,0.88)');
+    gg.addColorStop(1,'#010207');
     cx.fillStyle=gg; cx.fillRect(0,H*0.875,W,H*0.125);
     cx.fillStyle='#01020a';
     cx.beginPath();
-    cx.moveTo(0,H);
-    cx.lineTo(0,H*0.910);
-    cx.lineTo(W*0.075,H*0.910);
-    cx.lineTo(W*0.090,H*0.900);
-    cx.lineTo(W*0.135,H*0.900);
+    cx.moveTo(0,H); cx.lineTo(0,H*0.910); cx.lineTo(W*0.075,H*0.910);
+    cx.lineTo(W*0.090,H*0.900); cx.lineTo(W*0.135,H*0.900);
     cx.arc(W*0.160,H*0.895,W*0.026,Math.PI,0,false);
-    cx.lineTo(W*0.200,H*0.900);
-    cx.lineTo(W*0.215,H*0.900);
-    cx.lineTo(W*0.222,H*0.882);
-    cx.lineTo(W*0.228,H*0.882);
-    cx.lineTo(W*0.235,H*0.900);
-    cx.lineTo(W*0.280,H*0.905);
-    cx.lineTo(W*0.340,H*0.910);
-    cx.lineTo(W,H*0.918);
-    cx.lineTo(W,H);
-    cx.closePath(); cx.fill();
+    cx.lineTo(W*0.200,H*0.900); cx.lineTo(W*0.215,H*0.900);
+    cx.lineTo(W*0.222,H*0.882); cx.lineTo(W*0.228,H*0.882);
+    cx.lineTo(W*0.235,H*0.900); cx.lineTo(W*0.280,H*0.905);
+    cx.lineTo(W*0.340,H*0.910); cx.lineTo(W,H*0.918);
+    cx.lineTo(W,H); cx.closePath(); cx.fill();
     cx.restore();
   }
 
