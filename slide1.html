@@ -72,9 +72,22 @@ function qbez(t,x0,y0,x1,y1,x2,y2) {
 
 const CP = {x0:0.405,y0:0.500, x1:0.560,y1:0.455, x2:0.725,y2:0.555};
 
+// Seeded RNG for reproducible observational scatter
+function xorshift(seed) {
+  let s = seed >>> 0;
+  return () => { s^=s<<13; s^=s>>17; s^=s<<5; return (s>>>0)/4294967296; };
+}
+const rng = xorshift(1801); // seed = year of discovery
+
+// Small fixed jitter per point — an ellipse fit passes through the middle
+// with visible but small residuals (~15px on 1920-wide screen)
 const CERES = Array.from({length:19}, (_,i) => {
   const t = i/18;
-  return qbez(t,CP.x0,CP.y0,CP.x1,CP.y1,CP.x2,CP.y2);
+  const pt = qbez(t,CP.x0,CP.y0,CP.x1,CP.y1,CP.x2,CP.y2);
+  return {
+    rx: pt.rx + (rng()-0.5)*0.018,
+    ry: pt.ry + (rng()-0.5)*0.014,
+  };
 });
 
 const SUN = {rx:0.825, ry:0.690};
