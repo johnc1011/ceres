@@ -197,7 +197,7 @@ const PAUSE_POINTS = [2.0, 3.5, 4.5, 5.5, 6.5, CER_END, ZOOM_B,
 const SCENE_LABELS = ['1','2','2a','2c','2d','3','4','5','6','7','8','9','10'];
 
 document.addEventListener('keydown', e => {
-  if (e.code === 'Space' && paused) {
+  if ((e.code === 'Space' || e.code === 'ArrowRight') && paused) {
     paused = false;
     nextPauseIdx++;
     lastTs = null; // prevents delta spike on resume
