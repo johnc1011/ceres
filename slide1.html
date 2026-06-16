@@ -147,10 +147,10 @@ function draw(ts) {
   const annA       = fade(t, ANN_A, ANN_B);
   const glareScale = 0.50+0.50*fade(t, GLARE_A, GLARE_B);
   const zoomFade   = fade(t, ZOOM_A, ZOOM_B);
+  const errEmph    = fade(t, EMPH_A, EMPH_B);
   const hiliteA    = fade(t, HILITE_A, HILITE_B) * (1 - errEmph);
   const ellipseA   = fade(t, ELLIPSE_A, ELLIPSE_B);
   const errorA     = fade(t, ERROR_A, ERROR_B);
-  const errEmph    = fade(t, EMPH_A, EMPH_B);
 
   // Camera interpolation
   const camFX    = lerp(CAM0.fx, CAM1.fx, zoomFade)*W;
