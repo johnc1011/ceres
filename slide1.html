@@ -86,8 +86,8 @@ const SUN = {rx:0.825,ry:0.690};
 // ── Orbit fits ────────────────────────────────────────────────────────────────
 const HILITE     = [0,9,18];
 const HILITE_SET = new Set(HILITE);
-let   ORBIT_CIRC = null;  // circumscribed circle through 3 highlighted points
-let   ORBIT_LSQ  = null;  // least-squares circle through all 19
+let   ORBIT_CIRC = null;
+let   ORBIT_LSQ  = null;
 
 function circumscribedCircle(x1,y1,x2,y2,x3,y3) {
   const D=2*(x1*(y2-y3)+x2*(y3-y1)+x3*(y1-y2));
@@ -119,7 +119,6 @@ function solve3x3(A,b) {
 }
 
 function fitCircleLSQ(pts) {
-  // Minimise algebraic distance: x*u + y*v + w = x²+y², centre=(u/2,v/2)
   let Sx=0,Sy=0,Sxx=0,Sxy=0,Syy=0,Szx=0,Szy=0,Sz=0;
   for (const {x,y} of pts) {
     const z=x*x+y*y;
@@ -144,10 +143,18 @@ function getLSQOrbit() {
   return ORBIT_LSQ;
 }
 
-// ── Timing (t-units; divide by 500ms so 2× real speed) ───────────────────────
+// ── Timing (t-units; ÷250ms = 2× original speed) ─────────────────────────────
+// Scene 2: first dot + discovery arrow
+const DISC0_A    = 2.5;   // dot 0 fades in
+const DISC0_B    = 3.0;
+const DISCARR_A  = 2.8;   // discovery arrow fades in
+const DISCARR_B  = 3.4;
+const DISCARR_FA = 3.5;   // arrow fades out (scene 3 resumes)
+const DISCARR_FB = 5.0;
+// Scene 3: extra dots 1-18
 const CER0      = 3.0;
 const CERDT     = 0.32;
-const CER_END   = CER0+19*CERDT;
+const CER_END   = CER0+19*CERDT; // same endpoint; 18 extras spread over same span
 const ANN_A     = CER_END;
 const ANN_B     = CER_END+2.0;
 const GLARE_A   = CER_END+1.2;
@@ -162,24 +169,86 @@ const ERROR_A   = 28.5;
 const ERROR_B   = 33.5;
 const EMPH_A    = 33.5;
 const EMPH_B    = 37.5;
-// Phase 2: redraw with LSQ fit
-const REDRAW_A  = 37.5;   // old ellipse + errors start fading
-const REDRAW_B  = 40.5;   // old stuff fully gone
-const LSQ_IN_A  = 38.5;   // new ellipse starts sweeping in
-const LSQ_IN_B  = 44.5;   // new ellipse fully drawn
-const NEWERR_A  = 44.5;   // new error bars (all 19) fade in
+const REDRAW_A  = 37.5;
+const REDRAW_B  = 40.5;
+const LSQ_IN_A  = 38.5;
+const LSQ_IN_B  = 44.5;
+const NEWERR_A  = 44.5;
 const NEWERR_B  = 48.5;
 
 // Camera
 const CAM0={fx:0.500,fy:0.500,zoom:1.0,angle:0.00};
 const CAM1={fx:0.575,fy:0.515,zoom:2.20,angle:-0.10};
 
-// ── Draw ──────────────────────────────────────────────────────────────────────
-let t0=null;
+// ── Pause machinery ───────────────────────────────────────────────────────────
+let tAccum       = 0;      // accumulated animation time in ms
+let lastTs       = null;
+let wallT0       = null;
+let paused       = false;
+let nextPauseIdx = 0;
+// t-values at which each scene ends and animation pauses
+const PAUSE_POINTS = [2.0, 3.5, CER_END, ANN_B, GLARE_B, ZOOM_B, HILITE_B,
+                      ELLIPSE_B, ERROR_B, EMPH_B, LSQ_IN_B, NEWERR_B];
 
+document.addEventListener('keydown', e => {
+  if (e.code === 'Space' && paused) {
+    paused = false;
+    nextPauseIdx++;
+    lastTs = null; // prevents delta spike on resume
+  }
+});
+
+// ── UFO ───────────────────────────────────────────────────────────────────────
+function drawUFO(x, y, wt) {
+  const s = 22;
+  const p = 0.78 + 0.22 * Math.sin(wt * 5);
+  cx.save();
+
+  // underbelly glow
+  const bg = cx.createRadialGradient(x, y + s * 0.55, 0, x, y + s * 0.55, s * 1.6);
+  bg.addColorStop(0, `rgba(40,230,90,${0.38 * p})`);
+  bg.addColorStop(1,  'rgba(40,230,90,0)');
+  cx.fillStyle = bg;
+  cx.beginPath(); cx.ellipse(x, y + s * 0.5, s * 1.6, s * 0.7, 0, 0, Math.PI * 2); cx.fill();
+
+  // saucer rim
+  cx.fillStyle = '#145c24';
+  cx.beginPath(); cx.ellipse(x, y + s * 0.46, s, s * 0.27, 0, 0, Math.PI * 2); cx.fill();
+
+  // saucer top face
+  cx.fillStyle = '#1d9438';
+  cx.beginPath(); cx.ellipse(x, y + s * 0.30, s * 0.80, s * 0.20, 0, 0, Math.PI * 2); cx.fill();
+
+  // dome (upper half only)
+  cx.fillStyle = '#30d05a';
+  cx.beginPath(); cx.ellipse(x, y + s * 0.24, s * 0.40, s * 0.34, 0, Math.PI, 0, true); cx.fill();
+
+  // 3 underside lights
+  for (let i = -1; i <= 1; i++) {
+    cx.fillStyle = `rgba(170,255,200,${0.55 + 0.45 * p})`;
+    cx.beginPath(); cx.arc(x + i * s * 0.35, y + s * 0.52, 2.5, 0, Math.PI * 2); cx.fill();
+  }
+
+  cx.restore();
+}
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
 function draw(ts) {
-  if (!t0) t0=ts;
-  const t=(ts-t0)/500;
+  if (lastTs === null) lastTs = ts;
+  if (wallT0 === null) wallT0 = ts;
+  const wallT = (ts - wallT0) / 1000;
+
+  if (!paused) tAccum += ts - lastTs;
+  lastTs = ts;
+
+  let t = tAccum / 250; // ÷250ms → 2× original speed
+
+  // clamp to next pause point and trigger pause
+  if (nextPauseIdx < PAUSE_POINTS.length && t >= PAUSE_POINTS[nextPauseIdx]) {
+    tAccum = PAUSE_POINTS[nextPauseIdx] * 250;
+    t = PAUSE_POINTS[nextPauseIdx];
+    paused = true;
+  }
 
   cx.clearRect(0,0,W,H);
 
@@ -191,12 +260,14 @@ function draw(ts) {
   // ── Derived values ───────────────────────────────────────────────────────
   const skyA       = fade(t,0,2.0);
   const conA       = fade(t,1.5,3.5);
-  const ceresN     = Math.floor(fade(t,CER0,CER_END)*19);
+  const disc0A     = fade(t,DISC0_A,DISC0_B);
+  const discArrA   = fade(t,DISCARR_A,DISCARR_B) * (1-fade(t,DISCARR_FA,DISCARR_FB));
+  const ceresN     = Math.floor(fade(t,CER0,CER_END)*18); // 0-18 extra dots (indices 1-18)
   const annA       = fade(t,ANN_A,ANN_B);
   const glareScale = 0.50+0.50*fade(t,GLARE_A,GLARE_B);
   const zoomFade   = fade(t,ZOOM_A,ZOOM_B);
   const errEmph    = fade(t,EMPH_A,EMPH_B);
-  const oldOut     = 1-fade(t,REDRAW_A,REDRAW_B);  // old ellipse/errors fade out
+  const oldOut     = 1-fade(t,REDRAW_A,REDRAW_B);
   const hiliteA    = fade(t,HILITE_A,HILITE_B)*(1-errEmph)*oldOut;
   const ellipseA   = fade(t,ELLIPSE_A,ELLIPSE_B)*oldOut;
   const errorA     = fade(t,ERROR_A,ERROR_B)*oldOut;
@@ -294,16 +365,16 @@ function draw(ts) {
   }
 
   // ── Ceres trail ──────────────────────────────────────────────────────────
-  if (ceresN>1) {
-    cx.save(); cx.globalAlpha=0.40; cx.strokeStyle='#FFCC44';
+  if (disc0A>0 && ceresN>0) {
+    cx.save(); cx.globalAlpha=0.40*disc0A; cx.strokeStyle='#FFCC44';
     cx.lineWidth=1.6*lw; cx.setLineDash([4*lw,4*lw]);
     cx.beginPath(); cx.moveTo(CERES[0].rx*W,CERES[0].ry*H);
-    for (let i=1;i<ceresN;i++) cx.lineTo(CERES[i].rx*W,CERES[i].ry*H);
+    for (let i=1;i<=ceresN;i++) cx.lineTo(CERES[i].rx*W,CERES[i].ry*H);
     cx.stroke(); cx.setLineDash([]); cx.restore();
   }
 
   // ── Future path arrow ────────────────────────────────────────────────────
-  if (annA>0 && ceresN>=19) {
+  if (annA>0 && ceresN>=18) {
     const last=CERES[18];
     const lx=last.rx*W,ly=last.ry*H;
     const ang=Math.atan2(sy-ly,sx-lx);
@@ -323,8 +394,51 @@ function draw(ts) {
 
   // ── Ceres dots ───────────────────────────────────────────────────────────
   const dimF=1-0.5*hiliteA;
-  for (let i=0;i<ceresN;i++) {
-    if (HILITE_SET.has(i)) continue;
+
+  // Dot 0 — scene 2 first sighting (HILITE_SET member, handled separately)
+  if (disc0A>0) {
+    const pt=CERES[0]; const px=pt.rx*W,py=pt.ry*H;
+    const dotR=4*lw; const dotCol='#FFD060';
+    const [r,g,b]=hex2rgb(dotCol);
+    cx.save(); cx.globalAlpha=disc0A*dimF;
+    const gl=cx.createRadialGradient(px,py,0,px,py,dotR*5.5);
+    gl.addColorStop(0,`rgba(${r},${g},${b},0.70)`);
+    gl.addColorStop(0.4,`rgba(${r},${g},${b},0.22)`);
+    gl.addColorStop(1,`rgba(${r},${g},${b},0)`);
+    cx.fillStyle=gl; cx.beginPath(); cx.arc(px,py,dotR*5.5,0,Math.PI*2); cx.fill();
+    cx.beginPath(); cx.arc(px,py,dotR,0,Math.PI*2);
+    cx.fillStyle=dotCol; cx.fill();
+    cx.strokeStyle='rgba(255,255,255,0.55)'; cx.lineWidth=0.8*lw; cx.stroke();
+    cx.restore();
+  }
+
+  // Discovery arrow — big red callout from upper-right pointing at dot 0
+  if (discArrA>0) {
+    const pt=CERES[0]; const px=pt.rx*W,py=pt.ry*H;
+    const offX=85*lw, offY=-72*lw;
+    const startX=px+offX, startY=py+offY;
+    const ang=Math.atan2(-offY,-offX); // direction: start → dot
+    const ahL=24*lw;
+    cx.save(); cx.globalAlpha=discArrA;
+    cx.strokeStyle='#FF2222'; cx.lineWidth=3.5*lw;
+    cx.shadowColor='rgba(255,60,60,0.85)'; cx.shadowBlur=14*lw;
+    cx.beginPath();
+    cx.moveTo(startX,startY);
+    cx.lineTo(px-Math.cos(ang)*ahL*0.7, py-Math.sin(ang)*ahL*0.7);
+    cx.stroke();
+    cx.shadowBlur=10*lw;
+    cx.fillStyle='#FF2222';
+    cx.beginPath();
+    cx.moveTo(px,py);
+    cx.lineTo(px-ahL*Math.cos(ang-0.38), py-ahL*Math.sin(ang-0.38));
+    cx.lineTo(px-ahL*Math.cos(ang+0.38), py-ahL*Math.sin(ang+0.38));
+    cx.closePath(); cx.fill();
+    cx.restore();
+  }
+
+  // Extra dots 1-18 — scene 3 subsequent observations
+  for (let i=1;i<=ceresN;i++) {
+    if (HILITE_SET.has(i)) continue; // 9 and 18 appear only in HILITE phase
     const pt=CERES[i];
     const px=pt.rx*W,py=pt.ry*H;
     const dotR=(i===18?6.5:4)*lw;
@@ -381,12 +495,10 @@ function draw(ts) {
   if (lsqA>0) {
     const circ=getLSQOrbit();
     if (circ) {
-      // Find the leftmost and rightmost Ceres points by rx
       const left  = CERES.reduce((a,b)=>a.rx<b.rx?a:b);
       const right = CERES.reduce((a,b)=>a.rx>b.rx?a:b);
       const angL  = Math.atan2(left.ry*H -circ.cy, left.rx*W -circ.cx);
       let   angR  = Math.atan2(right.ry*H-circ.cy, right.rx*W-circ.cx);
-      // Ensure sweep goes clockwise (increasing angle) from left to right
       if (angR<=angL) angR+=Math.PI*2;
       const sweep = angR-angL;
       cx.save();
@@ -420,10 +532,11 @@ function draw(ts) {
     }
   }
 
-  // ── Highlighted points (3 anchors, fade with errEmph×oldOut) ─────────────
+  // ── Highlighted points (3 anchors) ───────────────────────────────────────
   if (hiliteA>0) {
     for (const i of HILITE) {
-      if (i>=ceresN) continue;
+      // dot 0 via disc0A; dots 9/18 via ceresN (1-indexed count)
+      if (i===0 ? disc0A<=0 : i>ceresN) continue;
       const pt=CERES[i];
       const px=pt.rx*W,py=pt.ry*H;
       const pulse=1+0.18*Math.sin(t*4+i*1.4);
@@ -463,6 +576,9 @@ function draw(ts) {
     cx.lineTo(W,H); cx.closePath(); cx.fill();
     cx.restore();
   }
+
+  // ── UFO pause indicator ───────────────────────────────────────────────────
+  if (paused) drawUFO(W / 2, 50, wallT);
 
   requestAnimationFrame(draw);
 }
