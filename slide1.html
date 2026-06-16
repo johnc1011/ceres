@@ -19,11 +19,9 @@ let W, H;
 function resize() {
   W = cv.width = window.innerWidth;
   H = cv.height = window.innerHeight;
-  ORBIT_CIRC = null;
-  ORBIT_LSQ  = null;
 }
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); ORBIT_CIRC = null; ORBIT_LSQ = null; });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
