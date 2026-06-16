@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Slide 1 — Ceres: Discovered &amp; Lost</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#000; overflow:hidden; }
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const cv = document.getElementById('c');
+const cx = cv.getContext('2d');
+let W, H;
+
+function resize() { W = cv.width = window.innerWidth; H = cv.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
+function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
+function fade(t,a,b) { return ease(clamp((t-a)/(b-a),0,1)); }
+function hex2rgb(h) {
+  return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
+}
+
+// ── Stars ─────────────────────────────────────────────────────────────────────
+const STARS = Array.from({length:600}, () => ({
+  rx: Math.random(),
+  ry: Math.random() * 0.84,
+  r:  Math.random()<0.05 ? Math.random()*1.6+1.5
+    : Math.random()<0.25 ? Math.random()*0.8+0.6
+    : Math.random()*0.4+0.15,
+  a:  Math.random()*0.55+0.4,
+  ph: Math.random()*Math.PI*2,
+  sp: Math.random()*1.5+0.5,
+  col: Math.random()<0.08 ? '#FFE8CC' : Math.random()<0.1 ? '#CCDEFF' : '#FFFFFF',
+}));
+
+// ── Taurus constellation ──────────────────────────────────────────────────────
+const TAU_S = [
+  {rx:0.365, ry:0.455, r:4.8, c:'#FF9944'},  // 0 α Aldebaran
+  {rx:0.335, ry:0.435, r:1.7, c:'#FFEECC'},  // 1 ε Tau
+  {rx:0.350, ry:0.415, r:1.9, c:'#FFEECC'},  // 2 δ Tau
+  {rx:0.385, ry:0.405, r:1.6, c:'#FFEECC'},  // 3 γ Tau
+  {rx:0.415, ry:0.425, r:1.7, c:'#FFEECC'},  // 4 θ Tau
+  {rx:0.440, ry:0.360, r:1.9, c:'#CCDDFF'},  // 5 ζ Tau
+  {rx:0.500, ry:0.270, r:2.9, c:'#AACCFF'},  // 6 β Elnath
+  // Pleiades
+  {rx:0.225, ry:0.290, r:2.5, c:'#88AAFF'},  // 7 Alcyone
+  {rx:0.210, ry:0.315, r:1.3, c:'#88AAFF'},
+  {rx:0.240, ry:0.275, r:1.2, c:'#88AAFF'},
+  {rx:0.200, ry:0.285, r:1.1, c:'#88AAFF'},
+  {rx:0.250, ry:0.305, r:1.0, c:'#88AAFF'},
+  {rx:0.220, ry:0.255, r:1.0, c:'#88AAFF'},
+  {rx:0.235, ry:0.330, r:0.9, c:'#88AAFF'},
+];
+const TAU_L = [
+  [0,1],[1,2],[2,3],[3,0],[0,4],[4,3],
+  [0,5],[5,6],
+];
+
+// ── Ceres: 19 observations on a quadratic bezier ─────────────────────────────
+function qbez(t,x0,y0,x1,y1,x2,y2) {
+  const m=1-t;
+  return {rx:m*m*x0+2*m*t*x1+t*t*x2, ry:m*m*y0+2*m*t*y1+t*t*y2};
+}
+
+const CP = {x0:0.405,y0:0.500, x1:0.560,y1:0.455, x2:0.725,y2:0.555};
+
+const CERES = Array.from({length:19}, (_,i) => {
+  const t = i/18;
+  return qbez(t,CP.x0,CP.y0,CP.x1,CP.y1,CP.x2,CP.y2);
+});
+
+const SUN = {rx:0.825, ry:0.690};
+
+// ── Timing (seconds) ──────────────────────────────────────────────────────────
+const CER0    = 3.0;
+const CERDT   = 0.32;
+const CER_END = CER0 + 19*CERDT; // ~9.1s
+const ANN_A   = CER_END;
+const ANN_B   = CER_END + 2.0;
+const GLARE_A = CER_END + 1.2;
+const GLARE_B = CER_END + 5.5;
+
+// ── Draw ──────────────────────────────────────────────────────────────────────
+let t0 = null;
+
+function draw(ts) {
+  if (!t0) t0 = ts;
+  const t = (ts - t0) / 1000;
+
+  cx.clearRect(0,0,W,H);
+
+  // Sky
+  const skyG = cx.createLinearGradient(0,0,0,H);
+  skyG.addColorStop(0, '#07091c');
+  skyG.addColorStop(0.55, '#040813');
+  skyG.addColorStop(1, '#020309');
+  cx.fillStyle = skyG;
+  cx.fillRect(0,0,W,H);
+
+  // Milky Way
+  const mw = cx.createLinearGradient(W*0.1,H*0.05,W*0.65,H*0.85);
+  mw.addColorStop(0,   'rgba(70,85,135,0)');
+  mw.addColorStop(0.35,'rgba(70,85,135,0.055)');
+  mw.addColorStop(0.5, 'rgba(70,85,135,0.08)');
+  mw.addColorStop(0.65,'rgba(70,85,135,0.055)');
+  mw.addColorStop(1,   'rgba(70,85,135,0)');
+  cx.fillStyle = mw;
+  cx.fillRect(0,0,W,H);
+
+  // Derived values
+  const skyA      = fade(t, 0, 2.0);
+  const conA      = fade(t, 1.5, 3.5);
+  const ceresN    = Math.floor(fade(t, CER0, CER_END) * 19);
+  const annA      = fade(t, ANN_A, ANN_B);
+  const glareScale= 0.50 + 0.50*fade(t, GLARE_A, GLARE_B);
+
+  const sx = SUN.rx*W, sy = SUN.ry*H;
+  const sunR   = Math.min(W,H)*0.050;
+  const glareR = Math.min(W,H)*0.46*glareScale;
+
+  // ── Stars ────────────────────────────────────────────────────────────────
+  cx.save();
+  for (const s of STARS) {
+    const dx=s.rx-SUN.rx, dy=s.ry-SUN.ry;
+    const dist=Math.sqrt(dx*dx+dy*dy);
+    const inner=0.20*glareScale, outer=0.40*glareScale;
+    if (dist < inner) continue;
+    let sa = s.a * skyA * (0.78+0.22*Math.sin(t*s.sp+s.ph));
+    if (dist < outer) sa *= (dist-inner)/(outer-inner);
+    const [r,g,b]=hex2rgb(s.col);
+    cx.beginPath();
+    cx.arc(s.rx*W, s.ry*H, s.r, 0, Math.PI*2);
+    cx.fillStyle = `rgba(${r},${g},${b},${sa})`;
+    cx.fill();
+  }
+  cx.restore();
+
+  // ── Sun: outer diffuse glare ─────────────────────────────────────────────
+  {
+    const g = cx.createRadialGradient(sx,sy,sunR,sx,sy,glareR);
+    g.addColorStop(0,    `rgba(255,215,90,${0.22*glareScale})`);
+    g.addColorStop(0.18, `rgba(255,175,45,${0.14*glareScale})`);
+    g.addColorStop(0.45, `rgba(255,130,20,${0.07*glareScale})`);
+    g.addColorStop(0.72, `rgba(255,85,10,${0.03*glareScale})`);
+    g.addColorStop(1,    'rgba(255,50,0,0)');
+    cx.fillStyle = g;
+    cx.beginPath();
+    cx.arc(sx,sy,glareR,0,Math.PI*2);
+    cx.fill();
+  }
+
+  // ── Sun: inner corona haze ───────────────────────────────────────────────
+  {
+    const g = cx.createRadialGradient(sx,sy,0,sx,sy,sunR*5);
+    g.addColorStop(0,   'rgba(255,250,210,0.85)');
+    g.addColorStop(0.35,'rgba(255,230,130,0.40)');
+    g.addColorStop(0.65,'rgba(255,200,70,0.15)');
+    g.addColorStop(1,   'rgba(255,150,30,0)');
+    cx.fillStyle = g;
+    cx.beginPath();
+    cx.arc(sx,sy,sunR*5,0,Math.PI*2);
+    cx.fill();
+  }
+
+  // ── Sun: disk ────────────────────────────────────────────────────────────
+  {
+    const g = cx.createRadialGradient(sx-sunR*0.25,sy-sunR*0.2,0,sx,sy,sunR);
+    g.addColorStop(0,   '#FFFFFF');
+    g.addColorStop(0.25,'#FFFBE0');
+    g.addColorStop(0.7, '#FFDF60');
+    g.addColorStop(1,   '#FFA820');
+    cx.fillStyle = g;
+    cx.beginPath();
+    cx.arc(sx,sy,sunR,0,Math.PI*2);
+    cx.fill();
+  }
+
+  // ── Sun: corona spikes ───────────────────────────────────────────────────
+  cx.save();
+  cx.translate(sx,sy);
+  for (let i=0; i<16; i++) {
+    const angle = (i/16)*Math.PI*2 + t*0.04;
+    const len = sunR*(0.8+0.25*Math.sin(t*1.1+i*0.7));
+    cx.beginPath();
+    cx.moveTo(Math.cos(angle)*sunR*0.92, Math.sin(angle)*sunR*0.92);
+    cx.lineTo(Math.cos(angle)*(sunR+len), Math.sin(angle)*(sunR+len));
+    cx.strokeStyle = `rgba(255,225,100,${0.35+0.1*Math.sin(t*0.9+i)})`;
+    cx.lineWidth = 1.2;
+    cx.stroke();
+  }
+  cx.restore();
+
+  // ── Taurus ───────────────────────────────────────────────────────────────
+  if (conA > 0) {
+    cx.save();
+    cx.globalAlpha = conA * 0.38;
+    cx.strokeStyle = '#3355AA';
+    cx.lineWidth = 0.9;
+    for (const [a,b] of TAU_L) {
+      cx.beginPath();
+      cx.moveTo(TAU_S[a].rx*W, TAU_S[a].ry*H);
+      cx.lineTo(TAU_S[b].rx*W, TAU_S[b].ry*H);
+      cx.stroke();
+    }
+    cx.restore();
+
+    cx.save();
+    cx.globalAlpha = conA;
+    for (const s of TAU_S) {
+      const x=s.rx*W, y=s.ry*H;
+      const [r,g,b]=hex2rgb(s.c);
+      const gl=cx.createRadialGradient(x,y,0,x,y,s.r*5.5);
+      gl.addColorStop(0,   `rgba(${r},${g},${b},0.65)`);
+      gl.addColorStop(0.35,`rgba(${r},${g},${b},0.2)`);
+      gl.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+      cx.fillStyle=gl;
+      cx.beginPath();
+      cx.arc(x,y,s.r*5.5,0,Math.PI*2);
+      cx.fill();
+      cx.fillStyle=s.c;
+      cx.beginPath();
+      cx.arc(x,y,s.r,0,Math.PI*2);
+      cx.fill();
+    }
+    cx.restore();
+  }
+
+  // ── Ceres: connecting trail ───────────────────────────────────────────────
+  if (ceresN > 1) {
+    cx.save();
+    cx.globalAlpha = 0.40;
+    cx.strokeStyle = '#FFCC44';
+    cx.lineWidth = 1.6;
+    cx.setLineDash([4,4]);
+    cx.beginPath();
+    cx.moveTo(CERES[0].rx*W, CERES[0].ry*H);
+    for (let i=1; i<ceresN; i++) cx.lineTo(CERES[i].rx*W, CERES[i].ry*H);
+    cx.stroke();
+    cx.restore();
+  }
+
+  // ── Future path: dashed arrow into glare ─────────────────────────────────
+  if (annA > 0 && ceresN >= 19) {
+    const last = CERES[18];
+    const lx=last.rx*W, ly=last.ry*H;
+    const angle = Math.atan2(sy-ly, sx-lx);
+    const endX = sx - Math.cos(angle)*sunR*1.15;
+    const endY = sy - Math.sin(angle)*sunR*1.15;
+
+    cx.save();
+    cx.globalAlpha = 0.75*annA;
+    cx.strokeStyle = '#FF8844';
+    cx.lineWidth = 2;
+    cx.setLineDash([7,5]);
+    cx.beginPath();
+    cx.moveTo(lx,ly);
+    cx.lineTo(endX,endY);
+    cx.stroke();
+    cx.setLineDash([]);
+    cx.fillStyle = '#FF8844';
+    cx.beginPath();
+    cx.moveTo(endX,endY);
+    cx.lineTo(endX-15*Math.cos(angle-0.38), endY-15*Math.sin(angle-0.38));
+    cx.lineTo(endX-15*Math.cos(angle+0.38), endY-15*Math.sin(angle+0.38));
+    cx.closePath();
+    cx.fill();
+    cx.restore();
+  }
+
+  // ── Ceres: dots ──────────────────────────────────────────────────────────
+  for (let i=0; i<ceresN; i++) {
+    const pt = CERES[i];
+    const px=pt.rx*W, py=pt.ry*H;
+    const isLast = i===18;
+    const dotR = isLast ? 6.5 : 4;
+    const dotCol = isLast ? '#FF6644' : '#FFD060';
+    const [r,g,b]=hex2rgb(dotCol);
+
+    const gl=cx.createRadialGradient(px,py,0,px,py,dotR*5.5);
+    gl.addColorStop(0,   `rgba(${r},${g},${b},0.70)`);
+    gl.addColorStop(0.4, `rgba(${r},${g},${b},0.22)`);
+    gl.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+    cx.fillStyle=gl;
+    cx.beginPath();
+    cx.arc(px,py,dotR*5.5,0,Math.PI*2);
+    cx.fill();
+
+    cx.beginPath();
+    cx.arc(px,py,dotR,0,Math.PI*2);
+    cx.fillStyle=dotCol;
+    cx.fill();
+    cx.strokeStyle='rgba(255,255,255,0.55)';
+    cx.lineWidth=0.8;
+    cx.stroke();
+  }
+
+  // ── Observatory horizon silhouette ────────────────────────────────────────
+  cx.save();
+  cx.globalAlpha = skyA;
+
+  const gg=cx.createLinearGradient(0,H*0.875,0,H);
+  gg.addColorStop(0,'rgba(2,3,9,0)');
+  gg.addColorStop(0.35,'rgba(2,3,9,0.88)');
+  gg.addColorStop(1,'#010207');
+  cx.fillStyle=gg;
+  cx.fillRect(0,H*0.875,W,H*0.125);
+
+  cx.fillStyle='#01020a';
+  cx.beginPath();
+  cx.moveTo(0,H);
+  cx.lineTo(0,H*0.910);
+  cx.lineTo(W*0.075,H*0.910);
+  cx.lineTo(W*0.090,H*0.900);
+  cx.lineTo(W*0.135,H*0.900);
+  cx.arc(W*0.160,H*0.895,W*0.026,Math.PI,0,false);
+  cx.lineTo(W*0.200,H*0.900);
+  cx.lineTo(W*0.215,H*0.900);
+  cx.lineTo(W*0.222,H*0.882);
+  cx.lineTo(W*0.228,H*0.882);
+  cx.lineTo(W*0.235,H*0.900);
+  cx.lineTo(W*0.280,H*0.905);
+  cx.lineTo(W*0.340,H*0.910);
+  cx.lineTo(W,H*0.918);
+  cx.lineTo(W,H);
+  cx.closePath();
+  cx.fill();
+
+  cx.restore();
+
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
