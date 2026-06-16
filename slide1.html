@@ -114,6 +114,8 @@ const HILITE_A  = 21.0;
 const HILITE_B  = 23.0;
 const ELLIPSE_A = 23.5;
 const ELLIPSE_B = 28.5;
+const ERROR_A   = 28.5;
+const ERROR_B   = 33.5;
 
 // Camera: identity → zoomed
 const CAM0 = {fx:0.500, fy:0.500, zoom:1.0, angle:0.00};
@@ -124,7 +126,7 @@ let t0 = null;
 
 function draw(ts) {
   if (!t0) t0 = ts;
-  const t = (ts-t0)/1000;
+  const t = (ts-t0)/500; // 2× speed
 
   cx.clearRect(0,0,W,H);
 
@@ -145,6 +147,7 @@ function draw(ts) {
   const zoomFade   = fade(t, ZOOM_A, ZOOM_B);
   const hiliteA    = fade(t, HILITE_A, HILITE_B);
   const ellipseA   = fade(t, ELLIPSE_A, ELLIPSE_B);
+  const errorA     = fade(t, ERROR_A, ERROR_B);
 
   // Camera interpolation
   const camFX    = lerp(CAM0.fx, CAM1.fx, zoomFade)*W;
@@ -335,6 +338,26 @@ function draw(ts) {
       cx.beginPath();
       cx.arc(circ.cx, circ.cy, circ.r, startAng, startAng+Math.PI*2*ellipseA, false);
       cx.stroke();
+      cx.restore();
+    }
+  }
+
+  // ── Error lines: 16 non-highlighted points → nearest point on orbit ─────
+  if (errorA > 0) {
+    const circ=getOrbit();
+    if (circ) {
+      cx.save();
+      cx.globalAlpha=errorA;
+      cx.strokeStyle='#FF3333';
+      cx.lineWidth=1.8*lw;
+      for (let i=0; i<19; i++) {
+        if (HILITE_SET.has(i)) continue;
+        const px=CERES[i].rx*W, py=CERES[i].ry*H;
+        const dx=px-circ.cx, dy=py-circ.cy;
+        const d=Math.sqrt(dx*dx+dy*dy);
+        const nx=circ.cx+dx/d*circ.r, ny=circ.cy+dy/d*circ.r;
+        cx.beginPath(); cx.moveTo(px,py); cx.lineTo(nx,ny); cx.stroke();
+      }
       cx.restore();
     }
   }
