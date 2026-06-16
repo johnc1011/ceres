@@ -18,12 +18,13 @@ let W, H;
 
 function resize() { W = cv.width = window.innerWidth; H = cv.height = window.innerHeight; }
 resize();
-window.addEventListener('resize', resize);
+window.addEventListener('resize', () => { resize(); ORBIT_CIRC = null; });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function ease(t) { return t < 0.5 ? 2*t*t : -1+(4-2*t)*t; }
 function clamp(v,a,b) { return Math.max(a,Math.min(b,v)); }
 function fade(t,a,b) { return ease(clamp((t-a)/(b-a),0,1)); }
+function lerp(a,b,t) { return a+(b-a)*t; }
 function hex2rgb(h) {
   return [parseInt(h.slice(1,3),16), parseInt(h.slice(3,5),16), parseInt(h.slice(5,7),16)];
 }
@@ -43,15 +44,14 @@ const STARS = Array.from({length:600}, () => ({
 
 // ── Taurus constellation ──────────────────────────────────────────────────────
 const TAU_S = [
-  {rx:0.365, ry:0.455, r:4.8, c:'#FF9944'},  // 0 α Aldebaran
-  {rx:0.335, ry:0.435, r:1.7, c:'#FFEECC'},  // 1 ε Tau
-  {rx:0.350, ry:0.415, r:1.9, c:'#FFEECC'},  // 2 δ Tau
-  {rx:0.385, ry:0.405, r:1.6, c:'#FFEECC'},  // 3 γ Tau
-  {rx:0.415, ry:0.425, r:1.7, c:'#FFEECC'},  // 4 θ Tau
-  {rx:0.440, ry:0.360, r:1.9, c:'#CCDDFF'},  // 5 ζ Tau
-  {rx:0.500, ry:0.270, r:2.9, c:'#AACCFF'},  // 6 β Elnath
-  // Pleiades
-  {rx:0.225, ry:0.290, r:2.5, c:'#88AAFF'},  // 7 Alcyone
+  {rx:0.365, ry:0.455, r:4.8, c:'#FF9944'},
+  {rx:0.335, ry:0.435, r:1.7, c:'#FFEECC'},
+  {rx:0.350, ry:0.415, r:1.9, c:'#FFEECC'},
+  {rx:0.385, ry:0.405, r:1.6, c:'#FFEECC'},
+  {rx:0.415, ry:0.425, r:1.7, c:'#FFEECC'},
+  {rx:0.440, ry:0.360, r:1.9, c:'#CCDDFF'},
+  {rx:0.500, ry:0.270, r:2.9, c:'#AACCFF'},
+  {rx:0.225, ry:0.290, r:2.5, c:'#88AAFF'},
   {rx:0.210, ry:0.315, r:1.3, c:'#88AAFF'},
   {rx:0.240, ry:0.275, r:1.2, c:'#88AAFF'},
   {rx:0.200, ry:0.285, r:1.1, c:'#88AAFF'},
@@ -59,154 +59,180 @@ const TAU_S = [
   {rx:0.220, ry:0.255, r:1.0, c:'#88AAFF'},
   {rx:0.235, ry:0.330, r:0.9, c:'#88AAFF'},
 ];
-const TAU_L = [
-  [0,1],[1,2],[2,3],[3,0],[0,4],[4,3],
-  [0,5],[5,6],
-];
+const TAU_L = [[0,1],[1,2],[2,3],[3,0],[0,4],[4,3],[0,5],[5,6]];
 
-// ── Ceres: 19 observations on a quadratic bezier ─────────────────────────────
+// ── Ceres: 19 positions with seeded observational scatter ────────────────────
 function qbez(t,x0,y0,x1,y1,x2,y2) {
   const m=1-t;
   return {rx:m*m*x0+2*m*t*x1+t*t*x2, ry:m*m*y0+2*m*t*y1+t*t*y2};
 }
-
-const CP = {x0:0.405,y0:0.500, x1:0.560,y1:0.455, x2:0.725,y2:0.555};
-
-// Seeded RNG for reproducible observational scatter
 function xorshift(seed) {
   let s = seed >>> 0;
   return () => { s^=s<<13; s^=s>>17; s^=s<<5; return (s>>>0)/4294967296; };
 }
-const rng = xorshift(1801); // seed = year of discovery
-
-// Small fixed jitter per point — an ellipse fit passes through the middle
-// with visible but small residuals (~15px on 1920-wide screen)
+const rng = xorshift(1801);
+const CP = {x0:0.405,y0:0.500, x1:0.560,y1:0.455, x2:0.725,y2:0.555};
 const CERES = Array.from({length:19}, (_,i) => {
-  const t = i/18;
-  const pt = qbez(t,CP.x0,CP.y0,CP.x1,CP.y1,CP.x2,CP.y2);
-  return {
-    rx: pt.rx + (rng()-0.5)*0.018,
-    ry: pt.ry + (rng()-0.5)*0.014,
-  };
+  const t=i/18;
+  const pt=qbez(t,CP.x0,CP.y0,CP.x1,CP.y1,CP.x2,CP.y2);
+  return { rx: pt.rx+(rng()-0.5)*0.018, ry: pt.ry+(rng()-0.5)*0.014 };
 });
 
 const SUN = {rx:0.825, ry:0.690};
 
+// ── Orbit: circumscribed circle through 3 highlighted points ─────────────────
+const HILITE     = [0, 9, 18];
+const HILITE_SET = new Set(HILITE);
+let   ORBIT_CIRC = null;
+
+function circumscribedCircle(x1,y1,x2,y2,x3,y3) {
+  const D = 2*(x1*(y2-y3)+x2*(y3-y1)+x3*(y1-y2));
+  if (Math.abs(D) < 1e-6) return null;
+  const s1=x1*x1+y1*y1, s2=x2*x2+y2*y2, s3=x3*x3+y3*y3;
+  const ux=(s1*(y2-y3)+s2*(y3-y1)+s3*(y1-y2))/D;
+  const uy=(s1*(x3-x2)+s2*(x1-x3)+s3*(x2-x1))/D;
+  return { cx:ux, cy:uy, r:Math.sqrt((x1-ux)**2+(y1-uy)**2) };
+}
+function getOrbit() {
+  if (ORBIT_CIRC) return ORBIT_CIRC;
+  const pts = HILITE.map(i=>({x:CERES[i].rx*W, y:CERES[i].ry*H}));
+  ORBIT_CIRC = circumscribedCircle(pts[0].x,pts[0].y,pts[1].x,pts[1].y,pts[2].x,pts[2].y);
+  return ORBIT_CIRC;
+}
+
 // ── Timing (seconds) ──────────────────────────────────────────────────────────
-const CER0    = 3.0;
-const CERDT   = 0.32;
-const CER_END = CER0 + 19*CERDT; // ~9.1s
-const ANN_A   = CER_END;
-const ANN_B   = CER_END + 2.0;
-const GLARE_A = CER_END + 1.2;
-const GLARE_B = CER_END + 5.5;
+const CER0      = 3.0;
+const CERDT     = 0.32;
+const CER_END   = CER0 + 19*CERDT;   // ~9.1s
+const ANN_A     = CER_END;
+const ANN_B     = CER_END + 2.0;
+const GLARE_A   = CER_END + 1.2;
+const GLARE_B   = CER_END + 5.5;
+const ZOOM_A    = 16.5;
+const ZOOM_B    = 21.0;
+const HILITE_A  = 21.0;
+const HILITE_B  = 23.0;
+const ELLIPSE_A = 23.5;
+const ELLIPSE_B = 28.5;
+
+// Camera: identity → zoomed
+const CAM0 = {fx:0.500, fy:0.500, zoom:1.0, angle:0.00};
+const CAM1 = {fx:0.575, fy:0.515, zoom:2.20, angle:-0.10};
 
 // ── Draw ──────────────────────────────────────────────────────────────────────
 let t0 = null;
 
 function draw(ts) {
   if (!t0) t0 = ts;
-  const t = (ts - t0) / 1000;
+  const t = (ts-t0)/1000;
 
   cx.clearRect(0,0,W,H);
 
-  // Sky
+  // Sky background (screen-space, no camera)
   const skyG = cx.createLinearGradient(0,0,0,H);
-  skyG.addColorStop(0, '#07091c');
+  skyG.addColorStop(0,    '#07091c');
   skyG.addColorStop(0.55, '#040813');
-  skyG.addColorStop(1, '#020309');
+  skyG.addColorStop(1,    '#020309');
   cx.fillStyle = skyG;
   cx.fillRect(0,0,W,H);
 
-  // Milky Way
-  const mw = cx.createLinearGradient(W*0.1,H*0.05,W*0.65,H*0.85);
-  mw.addColorStop(0,   'rgba(70,85,135,0)');
-  mw.addColorStop(0.35,'rgba(70,85,135,0.055)');
-  mw.addColorStop(0.5, 'rgba(70,85,135,0.08)');
-  mw.addColorStop(0.65,'rgba(70,85,135,0.055)');
-  mw.addColorStop(1,   'rgba(70,85,135,0)');
-  cx.fillStyle = mw;
-  cx.fillRect(0,0,W,H);
+  // ── Derived animation values ─────────────────────────────────────────────
+  const skyA       = fade(t, 0, 2.0);
+  const conA       = fade(t, 1.5, 3.5);
+  const ceresN     = Math.floor(fade(t, CER0, CER_END)*19);
+  const annA       = fade(t, ANN_A, ANN_B);
+  const glareScale = 0.50+0.50*fade(t, GLARE_A, GLARE_B);
+  const zoomFade   = fade(t, ZOOM_A, ZOOM_B);
+  const hiliteA    = fade(t, HILITE_A, HILITE_B);
+  const ellipseA   = fade(t, ELLIPSE_A, ELLIPSE_B);
 
-  // Derived values
-  const skyA      = fade(t, 0, 2.0);
-  const conA      = fade(t, 1.5, 3.5);
-  const ceresN    = Math.floor(fade(t, CER0, CER_END) * 19);
-  const annA      = fade(t, ANN_A, ANN_B);
-  const glareScale= 0.50 + 0.50*fade(t, GLARE_A, GLARE_B);
+  // Camera interpolation
+  const camFX    = lerp(CAM0.fx, CAM1.fx, zoomFade)*W;
+  const camFY    = lerp(CAM0.fy, CAM1.fy, zoomFade)*H;
+  const camZoom  = lerp(CAM0.zoom, CAM1.zoom, zoomFade);
+  const camAngle = lerp(CAM0.angle, CAM1.angle, zoomFade);
+  const lw       = 1/camZoom; // line-width scale to keep visual thickness constant
 
+  // Sun world-space coords
   const sx = SUN.rx*W, sy = SUN.ry*H;
   const sunR   = Math.min(W,H)*0.050;
   const glareR = Math.min(W,H)*0.46*glareScale;
 
-  // ── Stars ────────────────────────────────────────────────────────────────
+  // ── Apply camera transform ───────────────────────────────────────────────
   cx.save();
+  cx.translate(W/2, H/2);
+  cx.rotate(camAngle);
+  cx.scale(camZoom, camZoom);
+  cx.translate(-camFX, -camFY);
+
+  // Milky Way (in camera space, fades at zoom)
+  cx.save();
+  cx.globalAlpha = 1-zoomFade*0.6;
+  const mw = cx.createLinearGradient(W*0.1,H*0.05,W*0.65,H*0.85);
+  mw.addColorStop(0,    'rgba(70,85,135,0)');
+  mw.addColorStop(0.35, 'rgba(70,85,135,0.055)');
+  mw.addColorStop(0.5,  'rgba(70,85,135,0.08)');
+  mw.addColorStop(0.65, 'rgba(70,85,135,0.055)');
+  mw.addColorStop(1,    'rgba(70,85,135,0)');
+  cx.fillStyle = mw;
+  cx.fillRect(0,0,W,H);
+  cx.restore();
+
+  // ── Stars ────────────────────────────────────────────────────────────────
   for (const s of STARS) {
     const dx=s.rx-SUN.rx, dy=s.ry-SUN.ry;
     const dist=Math.sqrt(dx*dx+dy*dy);
     const inner=0.20*glareScale, outer=0.40*glareScale;
     if (dist < inner) continue;
-    let sa = s.a * skyA * (0.78+0.22*Math.sin(t*s.sp+s.ph));
+    let sa = s.a*skyA*(0.78+0.22*Math.sin(t*s.sp+s.ph));
     if (dist < outer) sa *= (dist-inner)/(outer-inner);
     const [r,g,b]=hex2rgb(s.col);
     cx.beginPath();
-    cx.arc(s.rx*W, s.ry*H, s.r, 0, Math.PI*2);
+    // Divide by camZoom so visual star size stays constant
+    cx.arc(s.rx*W, s.ry*H, s.r*lw, 0, Math.PI*2);
     cx.fillStyle = `rgba(${r},${g},${b},${sa})`;
     cx.fill();
   }
-  cx.restore();
 
-  // ── Sun: outer diffuse glare ─────────────────────────────────────────────
+  // ── Sun glare ────────────────────────────────────────────────────────────
   {
-    const g = cx.createRadialGradient(sx,sy,sunR,sx,sy,glareR);
+    const g=cx.createRadialGradient(sx,sy,sunR,sx,sy,glareR);
     g.addColorStop(0,    `rgba(255,215,90,${0.22*glareScale})`);
     g.addColorStop(0.18, `rgba(255,175,45,${0.14*glareScale})`);
     g.addColorStop(0.45, `rgba(255,130,20,${0.07*glareScale})`);
     g.addColorStop(0.72, `rgba(255,85,10,${0.03*glareScale})`);
     g.addColorStop(1,    'rgba(255,50,0,0)');
-    cx.fillStyle = g;
-    cx.beginPath();
-    cx.arc(sx,sy,glareR,0,Math.PI*2);
-    cx.fill();
+    cx.fillStyle=g;
+    cx.beginPath(); cx.arc(sx,sy,glareR,0,Math.PI*2); cx.fill();
   }
-
-  // ── Sun: inner corona haze ───────────────────────────────────────────────
   {
-    const g = cx.createRadialGradient(sx,sy,0,sx,sy,sunR*5);
+    const g=cx.createRadialGradient(sx,sy,0,sx,sy,sunR*5);
     g.addColorStop(0,   'rgba(255,250,210,0.85)');
     g.addColorStop(0.35,'rgba(255,230,130,0.40)');
     g.addColorStop(0.65,'rgba(255,200,70,0.15)');
     g.addColorStop(1,   'rgba(255,150,30,0)');
-    cx.fillStyle = g;
-    cx.beginPath();
-    cx.arc(sx,sy,sunR*5,0,Math.PI*2);
-    cx.fill();
+    cx.fillStyle=g;
+    cx.beginPath(); cx.arc(sx,sy,sunR*5,0,Math.PI*2); cx.fill();
   }
-
-  // ── Sun: disk ────────────────────────────────────────────────────────────
   {
-    const g = cx.createRadialGradient(sx-sunR*0.25,sy-sunR*0.2,0,sx,sy,sunR);
+    const g=cx.createRadialGradient(sx-sunR*0.25,sy-sunR*0.2,0,sx,sy,sunR);
     g.addColorStop(0,   '#FFFFFF');
     g.addColorStop(0.25,'#FFFBE0');
     g.addColorStop(0.7, '#FFDF60');
     g.addColorStop(1,   '#FFA820');
-    cx.fillStyle = g;
-    cx.beginPath();
-    cx.arc(sx,sy,sunR,0,Math.PI*2);
-    cx.fill();
+    cx.fillStyle=g;
+    cx.beginPath(); cx.arc(sx,sy,sunR,0,Math.PI*2); cx.fill();
   }
-
-  // ── Sun: corona spikes ───────────────────────────────────────────────────
   cx.save();
   cx.translate(sx,sy);
   for (let i=0; i<16; i++) {
-    const angle = (i/16)*Math.PI*2 + t*0.04;
-    const len = sunR*(0.8+0.25*Math.sin(t*1.1+i*0.7));
+    const a=(i/16)*Math.PI*2+t*0.04;
+    const len=sunR*(0.8+0.25*Math.sin(t*1.1+i*0.7));
     cx.beginPath();
-    cx.moveTo(Math.cos(angle)*sunR*0.92, Math.sin(angle)*sunR*0.92);
-    cx.lineTo(Math.cos(angle)*(sunR+len), Math.sin(angle)*(sunR+len));
-    cx.strokeStyle = `rgba(255,225,100,${0.35+0.1*Math.sin(t*0.9+i)})`;
-    cx.lineWidth = 1.2;
+    cx.moveTo(Math.cos(a)*sunR*0.92, Math.sin(a)*sunR*0.92);
+    cx.lineTo(Math.cos(a)*(sunR+len), Math.sin(a)*(sunR+len));
+    cx.strokeStyle=`rgba(255,225,100,${0.35+0.1*Math.sin(t*0.9+i)})`;
+    cx.lineWidth=1.2*lw;
     cx.stroke();
   }
   cx.restore();
@@ -214,9 +240,9 @@ function draw(ts) {
   // ── Taurus ───────────────────────────────────────────────────────────────
   if (conA > 0) {
     cx.save();
-    cx.globalAlpha = conA * 0.38;
-    cx.strokeStyle = '#3355AA';
-    cx.lineWidth = 0.9;
+    cx.globalAlpha=conA*0.38;
+    cx.strokeStyle='#3355AA';
+    cx.lineWidth=0.9*lw;
     for (const [a,b] of TAU_L) {
       cx.beginPath();
       cx.moveTo(TAU_S[a].rx*W, TAU_S[a].ry*H);
@@ -224,129 +250,153 @@ function draw(ts) {
       cx.stroke();
     }
     cx.restore();
-
     cx.save();
-    cx.globalAlpha = conA;
+    cx.globalAlpha=conA;
     for (const s of TAU_S) {
       const x=s.rx*W, y=s.ry*H;
       const [r,g,b]=hex2rgb(s.c);
       const gl=cx.createRadialGradient(x,y,0,x,y,s.r*5.5);
-      gl.addColorStop(0,   `rgba(${r},${g},${b},0.65)`);
-      gl.addColorStop(0.35,`rgba(${r},${g},${b},0.2)`);
-      gl.addColorStop(1,   `rgba(${r},${g},${b},0)`);
-      cx.fillStyle=gl;
-      cx.beginPath();
-      cx.arc(x,y,s.r*5.5,0,Math.PI*2);
-      cx.fill();
-      cx.fillStyle=s.c;
-      cx.beginPath();
-      cx.arc(x,y,s.r,0,Math.PI*2);
-      cx.fill();
+      gl.addColorStop(0,    `rgba(${r},${g},${b},0.65)`);
+      gl.addColorStop(0.35, `rgba(${r},${g},${b},0.2)`);
+      gl.addColorStop(1,    `rgba(${r},${g},${b},0)`);
+      cx.fillStyle=gl; cx.beginPath(); cx.arc(x,y,s.r*5.5,0,Math.PI*2); cx.fill();
+      cx.fillStyle=s.c; cx.beginPath(); cx.arc(x,y,s.r*lw,0,Math.PI*2); cx.fill();
     }
     cx.restore();
   }
 
-  // ── Ceres: connecting trail ───────────────────────────────────────────────
+  // ── Ceres trail ──────────────────────────────────────────────────────────
   if (ceresN > 1) {
     cx.save();
-    cx.globalAlpha = 0.40;
-    cx.strokeStyle = '#FFCC44';
-    cx.lineWidth = 1.6;
-    cx.setLineDash([4,4]);
+    cx.globalAlpha=0.40;
+    cx.strokeStyle='#FFCC44';
+    cx.lineWidth=1.6*lw;
+    cx.setLineDash([4*lw,4*lw]);
     cx.beginPath();
     cx.moveTo(CERES[0].rx*W, CERES[0].ry*H);
     for (let i=1; i<ceresN; i++) cx.lineTo(CERES[i].rx*W, CERES[i].ry*H);
     cx.stroke();
-    cx.restore();
-  }
-
-  // ── Future path: dashed arrow into glare ─────────────────────────────────
-  if (annA > 0 && ceresN >= 19) {
-    const last = CERES[18];
-    const lx=last.rx*W, ly=last.ry*H;
-    const angle = Math.atan2(sy-ly, sx-lx);
-    const endX = sx - Math.cos(angle)*sunR*1.15;
-    const endY = sy - Math.sin(angle)*sunR*1.15;
-
-    cx.save();
-    cx.globalAlpha = 0.75*annA;
-    cx.strokeStyle = '#FF8844';
-    cx.lineWidth = 2;
-    cx.setLineDash([7,5]);
-    cx.beginPath();
-    cx.moveTo(lx,ly);
-    cx.lineTo(endX,endY);
-    cx.stroke();
     cx.setLineDash([]);
-    cx.fillStyle = '#FF8844';
-    cx.beginPath();
-    cx.moveTo(endX,endY);
-    cx.lineTo(endX-15*Math.cos(angle-0.38), endY-15*Math.sin(angle-0.38));
-    cx.lineTo(endX-15*Math.cos(angle+0.38), endY-15*Math.sin(angle+0.38));
-    cx.closePath();
-    cx.fill();
     cx.restore();
   }
 
-  // ── Ceres: dots ──────────────────────────────────────────────────────────
-  for (let i=0; i<ceresN; i++) {
-    const pt = CERES[i];
-    const px=pt.rx*W, py=pt.ry*H;
-    const isLast = i===18;
-    const dotR = isLast ? 6.5 : 4;
-    const dotCol = isLast ? '#FF6644' : '#FFD060';
-    const [r,g,b]=hex2rgb(dotCol);
-
-    const gl=cx.createRadialGradient(px,py,0,px,py,dotR*5.5);
-    gl.addColorStop(0,   `rgba(${r},${g},${b},0.70)`);
-    gl.addColorStop(0.4, `rgba(${r},${g},${b},0.22)`);
-    gl.addColorStop(1,   `rgba(${r},${g},${b},0)`);
-    cx.fillStyle=gl;
+  // ── Future path arrow ────────────────────────────────────────────────────
+  if (annA > 0 && ceresN >= 19) {
+    const last=CERES[18];
+    const lx=last.rx*W, ly=last.ry*H;
+    const ang=Math.atan2(sy-ly, sx-lx);
+    const ex=sx-Math.cos(ang)*sunR*1.15, ey=sy-Math.sin(ang)*sunR*1.15;
+    const ahL=15*lw;
+    cx.save();
+    cx.globalAlpha=0.75*annA;
+    cx.strokeStyle='#FF8844'; cx.lineWidth=2*lw;
+    cx.setLineDash([7*lw,5*lw]);
+    cx.beginPath(); cx.moveTo(lx,ly); cx.lineTo(ex,ey); cx.stroke();
+    cx.setLineDash([]);
+    cx.fillStyle='#FF8844';
     cx.beginPath();
-    cx.arc(px,py,dotR*5.5,0,Math.PI*2);
-    cx.fill();
-
-    cx.beginPath();
-    cx.arc(px,py,dotR,0,Math.PI*2);
-    cx.fillStyle=dotCol;
-    cx.fill();
-    cx.strokeStyle='rgba(255,255,255,0.55)';
-    cx.lineWidth=0.8;
-    cx.stroke();
+    cx.moveTo(ex,ey);
+    cx.lineTo(ex-ahL*Math.cos(ang-0.38), ey-ahL*Math.sin(ang-0.38));
+    cx.lineTo(ex-ahL*Math.cos(ang+0.38), ey-ahL*Math.sin(ang+0.38));
+    cx.closePath(); cx.fill();
+    cx.restore();
   }
 
-  // ── Observatory horizon silhouette ────────────────────────────────────────
-  cx.save();
-  cx.globalAlpha = skyA;
+  // ── Ceres dots ───────────────────────────────────────────────────────────
+  const dimF = 1-0.5*hiliteA;
+  for (let i=0; i<ceresN; i++) {
+    if (HILITE_SET.has(i)) continue; // drawn separately below
+    const pt=CERES[i];
+    const px=pt.rx*W, py=pt.ry*H;
+    const dotR=(i===18?6.5:4)*lw;
+    const dotCol=i===18?'#FF6644':'#FFD060';
+    const [r,g,b]=hex2rgb(dotCol);
+    const gl=cx.createRadialGradient(px,py,0,px,py,dotR*5.5);
+    gl.addColorStop(0,   `rgba(${r},${g},${b},${0.70*dimF})`);
+    gl.addColorStop(0.4, `rgba(${r},${g},${b},${0.22*dimF})`);
+    gl.addColorStop(1,   `rgba(${r},${g},${b},0)`);
+    cx.fillStyle=gl; cx.beginPath(); cx.arc(px,py,dotR*5.5,0,Math.PI*2); cx.fill();
+    cx.beginPath(); cx.arc(px,py,dotR,0,Math.PI*2);
+    cx.fillStyle=dotCol; cx.fill();
+    cx.strokeStyle='rgba(255,255,255,0.55)'; cx.lineWidth=0.8*lw; cx.stroke();
+  }
 
-  const gg=cx.createLinearGradient(0,H*0.875,0,H);
-  gg.addColorStop(0,'rgba(2,3,9,0)');
-  gg.addColorStop(0.35,'rgba(2,3,9,0.88)');
-  gg.addColorStop(1,'#010207');
-  cx.fillStyle=gg;
-  cx.fillRect(0,H*0.875,W,H*0.125);
+  // ── Orbit ellipse (before highlights so highlights sit on top) ────────────
+  if (ellipseA > 0) {
+    const circ=getOrbit();
+    if (circ) {
+      const startAng=Math.atan2(CERES[HILITE[0]].ry*H-circ.cy, CERES[HILITE[0]].rx*W-circ.cx);
+      cx.save();
+      cx.globalAlpha=Math.min(1, ellipseA*1.4);
+      cx.strokeStyle='rgba(80,210,255,0.80)';
+      cx.lineWidth=2.5*lw;
+      cx.shadowColor='rgba(60,180,255,0.6)';
+      cx.shadowBlur=10*lw;
+      cx.beginPath();
+      cx.arc(circ.cx, circ.cy, circ.r, startAng, startAng+Math.PI*2*ellipseA, false);
+      cx.stroke();
+      cx.restore();
+    }
+  }
 
-  cx.fillStyle='#01020a';
-  cx.beginPath();
-  cx.moveTo(0,H);
-  cx.lineTo(0,H*0.910);
-  cx.lineTo(W*0.075,H*0.910);
-  cx.lineTo(W*0.090,H*0.900);
-  cx.lineTo(W*0.135,H*0.900);
-  cx.arc(W*0.160,H*0.895,W*0.026,Math.PI,0,false);
-  cx.lineTo(W*0.200,H*0.900);
-  cx.lineTo(W*0.215,H*0.900);
-  cx.lineTo(W*0.222,H*0.882);
-  cx.lineTo(W*0.228,H*0.882);
-  cx.lineTo(W*0.235,H*0.900);
-  cx.lineTo(W*0.280,H*0.905);
-  cx.lineTo(W*0.340,H*0.910);
-  cx.lineTo(W,H*0.918);
-  cx.lineTo(W,H);
-  cx.closePath();
-  cx.fill();
+  // ── Highlighted points ────────────────────────────────────────────────────
+  if (hiliteA > 0) {
+    for (const i of HILITE) {
+      if (i >= ceresN) continue;
+      const pt=CERES[i];
+      const px=pt.rx*W, py=pt.ry*H;
+      const pulse=1+0.18*Math.sin(t*4+i*1.4);
+      const dotR=(i===18?7:5.5)*lw*pulse;
 
+      cx.save();
+      cx.globalAlpha=hiliteA;
+      // Outer glow
+      const gl=cx.createRadialGradient(px,py,0,px,py,dotR*8);
+      gl.addColorStop(0,    'rgba(100,240,255,0.85)');
+      gl.addColorStop(0.30, 'rgba(60,190,230,0.30)');
+      gl.addColorStop(1,    'rgba(20,120,180,0)');
+      cx.fillStyle=gl; cx.beginPath(); cx.arc(px,py,dotR*8,0,Math.PI*2); cx.fill();
+      // Core
+      cx.fillStyle='#CCFFFF';
+      cx.beginPath(); cx.arc(px,py,dotR,0,Math.PI*2); cx.fill();
+      cx.strokeStyle='#FFFFFF'; cx.lineWidth=1.5*lw; cx.stroke();
+      cx.restore();
+    }
+  }
+
+  // ── Restore camera ────────────────────────────────────────────────────────
   cx.restore();
+
+  // ── Observatory silhouette (screen-space, fades out during zoom) ──────────
+  const horizA=skyA*(1-zoomFade);
+  if (horizA > 0.01) {
+    cx.save();
+    cx.globalAlpha=horizA;
+    const gg=cx.createLinearGradient(0,H*0.875,0,H);
+    gg.addColorStop(0,    'rgba(2,3,9,0)');
+    gg.addColorStop(0.35, 'rgba(2,3,9,0.88)');
+    gg.addColorStop(1,    '#010207');
+    cx.fillStyle=gg; cx.fillRect(0,H*0.875,W,H*0.125);
+    cx.fillStyle='#01020a';
+    cx.beginPath();
+    cx.moveTo(0,H);
+    cx.lineTo(0,H*0.910);
+    cx.lineTo(W*0.075,H*0.910);
+    cx.lineTo(W*0.090,H*0.900);
+    cx.lineTo(W*0.135,H*0.900);
+    cx.arc(W*0.160,H*0.895,W*0.026,Math.PI,0,false);
+    cx.lineTo(W*0.200,H*0.900);
+    cx.lineTo(W*0.215,H*0.900);
+    cx.lineTo(W*0.222,H*0.882);
+    cx.lineTo(W*0.228,H*0.882);
+    cx.lineTo(W*0.235,H*0.900);
+    cx.lineTo(W*0.280,H*0.905);
+    cx.lineTo(W*0.340,H*0.910);
+    cx.lineTo(W,H*0.918);
+    cx.lineTo(W,H);
+    cx.closePath(); cx.fill();
+    cx.restore();
+  }
 
   requestAnimationFrame(draw);
 }
